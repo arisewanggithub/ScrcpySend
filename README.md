@@ -202,6 +202,10 @@ or capture test is selected in either cohort.
 The shared transcript checker requires distinct per-test status **0**, one exact
 JUnit OK summary and one final instrumentation code **-1**. Missing/duplicate
 cases, crashes, failures and skips are rejected by executable fixture tests.
+Disposable CI release/debug AVD configs use `disk.dataPartition.size=2G`;
+duplicate settings are removed after AVD creation and before startup. This is
+the userdata property, not a global partition flag. CI checks 3 GiB free and
+retains filesystem diagnostics; no SDK/system directories are deleted.
 
 Only the test module supplies Error Prone annotations 2.41.0 and suppresses the
 compiler-only `javax.lang.model.element.Modifier` reference. No production Kotlin

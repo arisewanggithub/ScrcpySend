@@ -91,6 +91,9 @@ and AndroidKeyStore aliases owned by the **harness UID**, perform a synthetic
 SPAKE2 native exchange, and load bundled Conscrypt native/provider/exporter APIs.
 No target-app private preferences/identity are read or written.
 CI also launches the real app process separately without selecting Play.
+Wrong-stream-ID validation requires the listener's specific control-session
+rejection and no usable listener read/write connection. Caller transport connect
+may finish before that application-level check; its success is not acceptance.
 Conscrypt's established-socket TLS exporter and real Shizuku/scrcpy/supervisor
 deployment are **not** exercised by this smoke.
 
