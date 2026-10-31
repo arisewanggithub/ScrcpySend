@@ -10,10 +10,9 @@ import java.util.concurrent.TimeUnit
 internal object SyntheticEncodedFixture {
     data class EncodedVideoFrame(val data: ByteArray, val key: Boolean)
 
-    fun canonicalOpusHead() = "OpusHead".toByteArray(Charsets.US_ASCII) +
-        byteArrayOf(1, 2, 0x38, 1, 0x80.toByte(), 0xbb.toByte(), 0, 0, 0, 0, 0)
+    fun canonicalOpusHead() = EncodedTestPackets.canonicalOpusHead()
 
-    fun opusSilence() = byteArrayOf(0xf8.toByte(), 0xff.toByte(), 0xfe.toByte())
+    fun opusSilence() = EncodedTestPackets.opusSilence()
 
     fun encodeBlackFrame(): Pair<ByteArray, ByteArray> =
         encodeBlackFrames(1).let { (config, frames) -> config to frames.first().data }

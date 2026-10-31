@@ -21,11 +21,71 @@ foreach ($entry in $inventory.files) {
     Assert ($entry.path -notmatch '(^|/)(\.git|build|\.gradle|\.idea|\.vscode|\.copilot|node_modules)(/|$)|local\.properties$|\.(apk|jks|keystore)$') 'Forbidden snapshot path'
 }
 $workflow = Get-Content -LiteralPath (Join-Path $root '.github/workflows/build-release.yml') -Raw
+$appBuild = Get-Content -LiteralPath (Join-Path $root 'app/build.gradle') -Raw
+$releaseBlock = [regex]::Match($appBuild, '(?s)buildTypes\s*\{\s*release\s*\{(?<body>.*?)\}')
+Assert $releaseBlock.Success 'Explicit release build type missing'
+Assert ($releaseBlock.Groups['body'].Value -match 'minifyEnabled true' -and $releaseBlock.Groups['body'].Value -match 'shrinkResources true') 'Release must enable R8 and resource shrinking'
+Assert ($releaseBlock.Groups['body'].Value -match "getDefaultProguardFile\('proguard-android-optimize.txt'\)" -and $releaseBlock.Groups['body'].Value -match "'proguard-rules.pro'") 'Release must register optimized defaults and custom rules'
+$rules = Get-Content -LiteralPath (Join-Path $root 'app/proguard-rules.pro') -Raw
+$consumerRules = Get-Content -LiteralPath (Join-Path $root 'third_party/libadb/consumer-rules.pro') -Raw
+foreach ($type in @('dev.screencopy.sender.SrtNative', 'dev.screencopy.sender.ShellCaptureService',
+    'dev.screencopy.sender.LocalAdb', 'dev.screencopy.sender.Secrets',
+    'org.bouncycastle.jcajce.provider.asymmetric.RSA$Mappings',
+    'org.bouncycastle.jcajce.provider.asymmetric.X509$Mappings',
+    'org.bouncycastle.jcajce.provider.asymmetric.rsa.DigestSignatureSpi$SHA256',
+    'org.bouncycastle.jcajce.provider.asymmetric.x509.CertificateFactory')) {
+    Assert ($rules.Contains("class $type {")) "Runtime entry point missing: $type"
+}
+Assert ($rules -match 'native <methods>;' -and $rules -match 'public <init>\(\);') 'JNI and UserService constructor rules missing'
+Assert ($consumerRules -match 'class io\.github\.muntashirakon\.crypto\.spake2\.Spake2Context \{\s+native <methods>;') 'SPAKE2 RegisterNatives binding must be retained'
+Assert ((Get-Content (Join-Path $root 'third_party/libadb/build.gradle') -Raw) -match "consumerProguardFiles 'consumer-rules.pro'") 'Vendored libadb consumer rules must propagate'
+Assert (($rules + $consumerRules) -notmatch '(?m)^-(dontobfuscate|dontoptimize)\b|(?m)^-keep[^\r\n]*class [^\r\n]*\*') 'Custom rules must not blanket-keep packages or disable R8'
+$optionalWarnings = @([regex]::Matches(($rules + $consumerRules), '(?m)^-dontwarn ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
+Assert (($optionalWarnings -join ',') -ceq 'com.android.org.conscrypt.SSLParametersImpl,org.apache.harmony.xnet.provider.jsse.SSLParametersImpl') 'Only the verified pre-API22 Conscrypt adapter parameter types may suppress missing-class warnings'
+$mainManifest = Get-Content (Join-Path $root 'app/src/main/AndroidManifest.xml') -Raw
+$debugManifest = Get-Content (Join-Path $root 'app/src/debug/AndroidManifest.xml') -Raw
+Assert ($mainManifest -notmatch 'UpdateTestActivity' -and $debugManifest -match 'UpdateTestActivity') 'Updater test Activity must remain debug-only'
+Assert ($workflow -match ':app:assembleRelease -PsrtTrial=\$\{\{ matrix.srt \}\} -PrequireReleaseSigning=false') 'Both profiles need unsigned optimized release compilation before publication'
+Assert ($workflow -match 'path: app/build/outputs/mapping/release/mapping.txt') 'Exact signed-release mapping must be retained outside public release assets'
+Assert ($appBuild -match "releaseSmokeValue in \['true', 'false'\]" -and $appBuild -match 'releaseSmokeTest && \(requireReleaseSigning \|\| productionSigningConfigured\)') 'Strict smoke/publication signing exclusion missing'
+Assert ($appBuild -match "testBuildType = 'release'" -and $appBuild -match 'buildTypes.release.signingConfig = signingConfigs.debug') 'Explicit release test signing configuration missing'
+Assert ($releaseBlock.Groups['body'].Value -match 'debuggable false') 'Optimized release must not become debuggable'
+Assert ($appBuild -match 'sourceSets.androidTest.java.setSrcDirs' -and $appBuild -match "src/releaseSmokeTest/java" -and $appBuild -match 'NativeSrtTest.kt') 'Safe release smoke source cohort missing'
+Assert ($appBuild -match "file\('src/androidTest/java/dev/screencopy/sender/EncodedTestPackets.kt'\)" -and $appBuild -notmatch "from\([^}]*SyntheticEncodedFixture.kt") 'Smoke must copy the byte-only fixture, not the hardware encoder helper'
+$packets = Get-Content (Join-Path $root 'app/src/androidTest/java/dev/screencopy/sender/EncodedTestPackets.kt') -Raw
+Assert ($packets -notmatch 'import android\.|MediaCodec|SyntheticEncodedFixture|Secrets|Shizuku') 'Encoded smoke packets must remain platform-independent byte fixtures'
+Assert ((Get-Content (Join-Path $root 'app/src/androidTest/java/dev/screencopy/sender/NativeSrtTest.kt') -Raw) -notmatch 'SyntheticEncodedFixture') 'Native loopback tests must not depend on hardware fixtures'
+Assert ($appBuild -match 'sourceSets.androidTest.java.setSrcDirs\(smokeSourceDirectories\)' -and $appBuild -match 'sourceSets.androidTest.kotlin.setSrcDirs\(smokeSourceDirectories\)') 'Both independent AGP Java and Kotlin roots must replace their androidTest defaults'
+Assert ($appBuild -match 'from\(originalSmokeTestFiles\)\s*\{' -and $appBuild -match "it.name != 'prepareReleaseSmokeSources'" -and $appBuild -match '\]\.asImmutable\(\)') 'Smoke Sync must use one immutable original-file source argument and exclude itself from consumer dependencies'
+Assert ($appBuild -match "androidTestImplementation 'com.google.errorprone:error_prone_annotations:2.41.0'") 'Instrumentation R8 needs the pinned AndroidX Test annotation dependency'
+Assert ((Get-Content (Join-Path $root 'streaming-muxer/build.gradle') -Raw) -match "compileOnly 'com.google.errorprone:error_prone_annotations:2.41.0'") 'Instrumentation annotation pin must match the vendored muxer compile-only pin'
+Assert ($appBuild -notmatch "(?m)^\s*(implementation|api|compileOnly) ['""]com.google.errorprone:") 'Error Prone annotation fix must remain test-only'
+$testRules = Get-Content (Join-Path $root 'app/release-smoke-test-rules.pro') -Raw
+$testWarnings = @([regex]::Matches($testRules, '(?m)^-dontwarn ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
+Assert (($testWarnings -join ',') -ceq 'javax.lang.model.element.Modifier') 'Only Error Prone compiler metadata may suppress this exact missing test-only enum'
+Assert (($rules + $consumerRules) -notmatch 'javax.lang.model') 'Compiler model suppression must never affect production R8'
+Assert ($appBuild -match "buildTypes.release.testProguardFiles 'release-smoke-test-rules.pro'") 'Compiler metadata rule must apply only to the test APK'
+Assert ($appBuild -notmatch 'from\(file\([^;]*?\)\s*\{' -and $appBuild -notmatch 'from\(sourceSets') 'Smoke Sync must not treat a configure closure/generated source set as a lazy task source'
+Assert ($workflow -match '-PrequireReleaseSigning=true -PreleaseSmokeTest=false') 'Publisher must explicitly disable smoke signing'
+$smokeScript = Get-Content (Join-Path $PSScriptRoot 'run-release-smoke.sh') -Raw
+Assert ($smokeScript -match 'NativeSrtTest,dev.screencopy.sender.ReleaseRuntimeSmokeTest' -and $smokeScript -notmatch 'AppUpdateRemoteUiTest|ShizukuDeviceTest|connectedAndroidTest') 'Release smoke must select only the approved safe tests'
+Assert ($smokeScript -match 'INSTRUMENTATION_STATUS_CODE: -\[234\]' -and $smokeScript -match 'expected=11') 'Smoke tests must reject skips and enforce their executed count'
+$smokeTestCount = 0
+foreach ($path in @('app/src/androidTest/java/dev/screencopy/sender/NativeSrtTest.kt',
+    'app/src/releaseSmokeTest/java/dev/screencopy/sender/ReleaseRuntimeSmokeTest.kt')) {
+    $smokeTestCount += [regex]::Matches((Get-Content (Join-Path $root $path) -Raw), '@Test\s+fun\s+').Count
+}
+Assert ($smokeTestCount -eq 11) 'Release smoke expected count must match its exact source cohort'
+$runner = Get-Content (Join-Path $root 'app/src/releaseSmokeTest/java/dev/scrcpy/smoke/ReleaseSmokeRunner.kt') -Raw
+Assert ($runner -match 'releaseSmoke' -and $runner -match 'Build.VERSION.SDK_INT == 35' -and $runner -match 'FLAG_DEBUGGABLE') 'Emulator/test-intent/non-debuggable runtime guard missing'
+& (Join-Path $PSScriptRoot 'verify-release-smoke-apks.ps1') -SelfTest
+$smokeJob = [regex]::Match($workflow, '(?ms)^  optimized-native-smoke:.*?(?=^  publish:)').Value
+Assert ($smokeJob -match 'releaseSmokeTest=true' -and $smokeJob -notmatch 'secrets\.|publication\.keystore|release upload') 'Smoke job must not use production signing or publication'
 Assert ($workflow -notmatch 'pull_request_target|connectedAndroidTest|adb connect') 'Unsafe CI trigger/device test'
 Assert ($workflow -match "srt: \['false', 'true'\]") 'Both transport build modes must be checked'
 Assert ($workflow -match 'requireReleaseSigning=true') 'Publication signing guard missing'
 Assert ($workflow -match '-e class dev\.scrcpy\.update\.AppUpdateRemoteUiTest ') 'Only the agreed remote UI instrumentation class may run'
-Assert ($workflow -match 'needs: \[checks, update-ui\]') 'Release must wait for both test jobs'
+Assert ($workflow -match 'needs: \[checks, update-ui, optimized-native-smoke\]') 'Release must wait for all test jobs'
 Assert ($workflow -match 'protocolVersion' -or (Get-Content (Join-Path $PSScriptRoot 'make-update-manifest.ps1') -Raw) -match 'protocolVersion = 3') 'Manifest protocol missing'
 Assert ($workflow -match 'if: always\(\)') 'Keystore cleanup must run on failure'
 Assert ($workflow.IndexOf('name: Build unsigned-development app and UI test APKs') -lt $workflow.IndexOf('name: Run only AppUpdateRemoteUiTest')) 'APK compilation must precede emulator launch'
@@ -174,7 +234,7 @@ try {
         Assert ($privatePath -in $fixtureExport.excluded) 'Private candidate must be explicitly excluded'
         Assert (!(Test-Path -LiteralPath (Join-Path $fixtureDestination $privatePath))) 'Private fixture was copied'
     }
-    Write-Output "PASS publication scripts: verified export $($export.files.Count) files; exact schema, hashes, metadata and six rejection cases"
+    Write-Output "PASS publication scripts: optimized release policy; verified export $($export.files.Count) files; exact schema, hashes, metadata and six rejection cases"
 } finally {
     if ($env:OS -eq 'Windows_NT') { Remove-Item -LiteralPath "Function:global:$aaptPath" -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $scratch -Recurse -Force

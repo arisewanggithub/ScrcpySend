@@ -1,6 +1,21 @@
 plugins { id 'com.android.application' }
 
 def srtTrial = providers.gradleProperty('srtTrial').getOrElse('false').toBoolean()
+def releaseSmokeValue = providers.gradleProperty('releaseSmokeTest').getOrElse('false')
+def requireSigningValue = providers.gradleProperty('requireReleaseSigning').getOrElse('false')
+if (!(releaseSmokeValue in ['true', 'false']) || !(requireSigningValue in ['true', 'false'])) {
+    throw new GradleException('releaseSmokeTest and requireReleaseSigning must be literal true or false')
+}
+def releaseSmokeTest = releaseSmokeValue == 'true'
+def requireReleaseSigning = requireSigningValue == 'true'
+def productionSigningConfigured = providers.gradleProperty('releaseSigningKeystorePath').isPresent() ||
+    ['ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_BASE64', 'ANDROID_KEY_ALIAS', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_PASSWORD'].any {
+        providers.environmentVariable(it).isPresent()
+    }
+if (releaseSmokeTest && (requireReleaseSigning || productionSigningConfigured)) {
+    throw new GradleException('Release smoke signing is test-only and cannot coexist with publication or production signing configuration')
+}
+if (releaseSmokeTest && !srtTrial) throw new GradleException('Release smoke requires srtTrial=true; skipped native tests are forbidden')
 def releaseVersionCode = providers.gradleProperty('releaseVersionCode').getOrElse('1').toInteger()
 if (releaseVersionCode < 1) throw new GradleException('releaseVersionCode must be a positive Android version code')
 def releaseKeystore = providers.gradleProperty('releaseSigningKeystorePath')
@@ -14,7 +29,7 @@ def hasReleaseSigning = releaseKeystore && releaseSigning.values().every { it }
 if ((releaseKeystore || releaseSigning.values().any { it }) && !hasReleaseSigning) {
     throw new GradleException('Incomplete release signing configuration; provide the keystore path and all three signing environment variables')
 }
-if (providers.gradleProperty('requireReleaseSigning').getOrElse('false').toBoolean() && !hasReleaseSigning) {
+if (requireReleaseSigning && !hasReleaseSigning) {
     throw new GradleException('Publication requires manually configured release signing; unsigned APK publication is forbidden')
 }
 
@@ -39,6 +54,14 @@ android {
         buildConfigField 'boolean', 'SRT_TRIAL', srtTrial.toString()
     }
     lint { abortOnError true }
+    buildTypes {
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
     if (hasReleaseSigning) {
         signingConfigs {
             publication {
@@ -50,8 +73,43 @@ android {
         }
         buildTypes.release.signingConfig = signingConfigs.publication
     }
+    if (releaseSmokeTest) {
+        testBuildType = 'release'
+        buildTypes.release.signingConfig = signingConfigs.debug
+        buildTypes.release.testProguardFiles 'release-smoke-test-rules.pro'
+        defaultConfig.testInstrumentationRunner = 'dev.scrcpy.smoke.ReleaseSmokeRunner'
+        def smokeSourceDirectories = [
+            file('src/releaseSmokeTest/java'), file("${layout.buildDirectory.get().asFile}/generated/releaseSmokeTests/java")
+        ]
+        sourceSets.androidTest.java.setSrcDirs(smokeSourceDirectories)
+        // AGP's Kotlin roots independently default to androidTest/java and
+        // androidTest/kotlin; changing Java roots does not replace those roots.
+        sourceSets.androidTest.kotlin.setSrcDirs(smokeSourceDirectories)
+    }
     ndkVersion '27.2.12479018'
     sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/supervisorAssets').get().asFile)
+}
+
+if (releaseSmokeTest) {
+    def originalSmokeTestFiles = [
+        file('src/androidTest/java/dev/screencopy/sender/NativeSrtTest.kt'),
+        file('src/androidTest/java/dev/screencopy/sender/EncodedTestPackets.kt')
+    ].asImmutable()
+    def smokeOutputDirectory = file("${layout.buildDirectory.get().asFile}/generated/releaseSmokeTests/java")
+    def selectedSmokeSources = tasks.register('prepareReleaseSmokeSources', Sync) {
+        // One source argument selects from(Object, Closure), not the varargs
+        // overload that would interpret this closure as a lazy source.
+        from(originalSmokeTestFiles) {
+            into 'dev/screencopy/sender'
+        }
+        into smokeOutputDirectory
+    }
+    tasks.matching {
+        it.name != 'prepareReleaseSmokeSources' &&
+            it.name in ['preReleaseAndroidTestBuild', 'compileReleaseAndroidTestKotlin', 'compileReleaseAndroidTestJavaWithJavac']
+    }.configureEach {
+        dependsOn selectedSmokeSources
+    }
 }
 
 if (srtTrial) {
@@ -139,6 +197,9 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.15.2'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    // AndroidX Test monitor references these CLASS-retained annotations without
+    // publishing their dependency. Match streaming-muxer's compile-only pin.
+    androidTestImplementation 'com.google.errorprone:error_prone_annotations:2.41.0'
     if (providers.gradleProperty('receiverClasses').isPresent()) {
         testImplementation files(providers.gradleProperty('receiverClasses').get())
     }

@@ -384,7 +384,7 @@ class NativeSrtTest {
         val caller = SrtNative.createCaller("sc-0000000000000005", 100)
         try {
             SrtNative.connect(caller, "127.0.0.1", sender.port, 5000)
-            sender.config(2, 1, CodecConfig.audio("opus", SyntheticEncodedFixture.canonicalOpusHead()))
+            sender.config(2, 1, CodecConfig.audio("opus", EncodedTestPackets.canonicalOpusHead()))
             val receiving = executor.submit(Callable { receiveFragments(caller, ByteArrayOutputStream(), 9) })
             for ((index, config) in configurations.withIndex()) {
                 sender.config(1, index + 1, CodecConfig.video("h265", config))

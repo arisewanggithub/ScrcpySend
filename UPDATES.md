@@ -52,6 +52,64 @@ corresponding-source/relink review. This is separate from signing configuration
 and does not create a license or compliance guarantee. Source export and CI
 checks do not require binary publication approval.
 
+## Optimized future releases
+
+Release builds use R8 and resource shrinking; debug behavior is unchanged.
+Optimization does not change application IDs, updater SHA/package/version/signer
+checks, host allowlists, version assignment, signing requirements or binary
+distribution approval. Use a **new future version** with the same permanent key
+configured by the user. Do not move/force existing `v1.0.0` tags or replace any
+already published APK. No key regeneration, secret setup or old-release repair
+is part of optimization.
+
+The signed publisher retains its exact `mapping.txt` for 30 days as a named
+Actions artifact tied to commit/run/attempt, not as a public release asset.
+Mapping contains code structure, not signing material; archive it through
+appropriate workflow-artifact access before expiry for retracing release crash
+stacks. Never print signing secrets or include keystores in diagnostics.
+
+The [README](README.md#release-optimization) gives unsigned R8 assembly and APK,
+mapping, resource and native-export inspection targets. Script contracts only
+guard configuration; a successful optimized assembly is still required.
+
+The separate `optimized-native-smoke` job uses a disposable Linux API35 x86_64
+emulator and Gradle's runner-generated debug signer only for that test run.
+`releaseSmokeTest=true` selects `testBuildType=release` without enabling app
+debuggability or weakening R8/resource shrinking. Any production signing
+configuration or `requireReleaseSigning=true` conflicts with smoke mode.
+The publisher explicitly uses smoke=false and rebuilds with the user-configured
+permanent signer; smoke APKs, debug keystores and AVD storage are never artifacts.
+
+Only `NativeSrtTest` (six synthetic loopback/muxer tests) and
+`ReleaseRuntimeSmokeTest` (five tests) execute. The runtime cohort covers the
+actual Shizuku Binder constructor by class-name reflection without attach,
+deployment or destroy; `LocalAdb`'s BC identity generation/signature/certificate
+round trip in UUID-isolated emulator storage without connecting; SPAKE2's four
+kept native methods through a synthetic exchange; bundled Conscrypt provider
+reflection/native availability/TLS context creation/exporter-method resolution;
+and actual Activity/resource launch without selecting Play or installing updates.
+Conscrypt's established-socket TLS exporter and real Shizuku/scrcpy/supervisor
+deployment are **not** exercised by this smoke.
+
+CI installs only on its isolated emulator after DEX verification rejects
+duplicate app implementations, unminified crypto/ADB libraries, native wrappers
+in the test APK and release debug fixtures. The runner additionally requires an
+explicit `releaseSmoke=true` argument and non-debuggable target. The shell driver
+requires Linux Actions and checks emulator/API35 identity before installation.
+Every selected test must complete successfully; ignored/assumption-skipped tests
+or incomplete execution fail the job. Only result/log/policy files and mappings
+are retained, for seven days.
+
+AGP applies the tested release mapping to instrumentation. This cannot restore
+APIs removed by optimization; compile/runtime failures must be investigated,
+not hidden with whole-package keeps or duplicate unminified test implementations.
+The existing `LocalAdb` identity constructor/accessors and the explicit isolated
+`Secrets` constructor are retained narrowly because the separate test APK must
+call them after optimization. No new production hook, backend path, network
+method keep or whole-ADB-package keep is added.
+No real-phone capture/Stop, especially H.265, is part of R8 acceptance.
+Ephemeral signing does not validate an in-place production-signer update.
+
 ## Test targets
 
 Both repositories contain pure JVM `dev.scrcpy.update.ReleasePolicyTest` and `dev.scrcpy.update.ReleaseClientTest`.
