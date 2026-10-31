@@ -1,5 +1,5 @@
 /*
- * ScreenCopy live-fragment extensions to AndroidX Media3 1.11.1.
+ * ScrcpySend live-fragment extensions to AndroidX Media3 1.11.1.
  * Licensed under the Apache License, Version 2.0, like the upstream module.
  */
 package androidx.media3.muxer;

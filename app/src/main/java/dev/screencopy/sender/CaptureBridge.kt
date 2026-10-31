@@ -15,7 +15,7 @@ internal interface CaptureBridge : Closeable {
     fun cleanup(id: String)
 }
 
-/** Retained only for legacy regression coverage. The primary UI/session never constructs it. */
+/** ADB utility adapter for regression coverage, not the primary Shizuku capture backend. */
 internal class AdbCaptureBridge(private val adb: LocalAdb) : CaptureBridge {
     private val streams = mutableListOf<io.github.muntashirakon.adb.AdbStream>()
     private var shell: io.github.muntashirakon.adb.AdbStream? = null

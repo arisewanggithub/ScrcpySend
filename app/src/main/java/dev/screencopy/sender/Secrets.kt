@@ -28,7 +28,7 @@ class Secrets internal constructor(context: Context, keyAlias: String = "screenc
         }
         store.getKey(keyAlias, null) as SecretKey
         }
-        // Remove obsolete ScreenCopy v1 trust without deleting the local ADB identity/key.
+        // Discard unused peer records while preserving the local ADB identity/key.
         synchronized(identityLock) {
             if ((prefs.contains("receivers") || prefs.contains("senderId")) &&
                 !prefs.edit().remove("receivers").remove("senderId").commit())

@@ -43,7 +43,7 @@ class ReceiverLink(private val target: ReceiverTarget) : Closeable {
             if (name.isEmpty() || name.length > 80) throw IOException("PROTOCOL: receiver name must be 1..80 characters")
             val versions = json.getJSONArray("versions")
             if ((0 until versions.length()).none { versions.get(it) is Int && versions.getInt(it) == Wire.VERSION })
-                throw IOException("VERSION: receiver must support plain TCP ScreenCopy v3")
+                throw IOException("VERSION: receiver must support wire protocol version 3 over plain TCP")
             if (expired.get()) throw SocketTimeoutException("TIMEOUT: receiver startup exceeded its phase deadline")
             success = true
         } catch (e: IOException) {

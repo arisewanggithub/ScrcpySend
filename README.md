@@ -6,8 +6,9 @@ for capture, with **SRT / fragmented MP4** transport and a **custom TCP**
 compatibility option. These are independent applications, not official scrcpy
 applications.
 
-The Android application ID remains `dev.screencopy.sender`. The on-wire
-`SCPY` framing and protocol version **3** are independent of the display name.
+The Android application ID is `dev.screencopy.sender`. The on-wire
+`SCPY` framing uses **wire protocol version 3**, a compatibility discriminator
+separate from application release versions.
 
 ## Architecture and supported formats
 
@@ -38,7 +39,7 @@ labels, not identities: discovery selects the actual UDP-source IP and TCP
 port, never a name-based redirect. Do not expose the service to the internet
 or assume protection against LAN observers or spoofed discovery.
 
-Both applications must implement protocol **v3**. Positive internal session
+Both applications must implement **wire protocol version 3**. Positive internal session
 IDs and track generations remain mandatory; they are not user pairing codes.
 Only one receiver endpoint is active, and explicit acceptance precedes capture.
 Present unsupported transports/configurations are rejected, not silently
@@ -105,7 +106,7 @@ Use **JDK21**, **Node22**, public **Android SDK36 / Build Tools36.0.0**,
 **NDK27.2.12479018**, and **CMake3.22.1**. The **Gradle9.8.1** wrapper is
 checksum-pinned; **AGP9.4.1** provides built-in Kotlin support, with JVM17
 targets. App, streaming-muxer and libadb explicitly compile against SDK36;
-the app's minimum SDK30 and target SDK35 remain unchanged.
+the app's minimum SDK is30 and target SDK is35.
 Media3 1.11.1's AAR metadata requires minimum compile SDK36.
 Test fixture/source reads use `Files.readAllBytes` with strict UTF-8 decoding;
 the SDK36 API stubs do not declare the JDK's `Files.readString` method.
@@ -142,7 +143,7 @@ recoverable without automatically reinstalling. See [UPDATES.md](UPDATES.md).
 
 CI supplies `releaseVersionCode=10000+github.run_number` and a
 `releaseVersionName` from the stable tag (without `v`) or `dev-<short-sha>`.
-Local version defaults are unchanged. Preserve run-number continuity; a
+Local defaults are versionCode1/versionName1.0. Preserve run-number continuity; a
 replacement workflow/repository must choose an offset above installed versions.
 
 Stable releases use `vMAJOR.MINOR.PATCH` tags. Main prereleases additionally

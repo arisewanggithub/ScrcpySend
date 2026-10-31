@@ -12,7 +12,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
-/** ScreenCopy v3, independent of Android and scrcpy. */
+/** ScrcpySend / ScrcpyRecv wire protocol version 3, separate from app release versions. */
 object Wire {
     const val HELLO = 1
     const val VERSION = 3
@@ -62,8 +62,8 @@ object Wire {
 
     fun read(source: InputStream): Message {
         val input = DataInputStream(source)
-        if (input.readInt() != 0x53435059) throw IOException("VERSION: plain ScreenCopy v3 magic required; TLS is unsupported")
-        if (input.readUnsignedShort() != VERSION) throw IOException("VERSION: ScreenCopy v3 required; update both apps")
+        if (input.readInt() != 0x53435059) throw IOException("VERSION: SCPY wire magic required; TLS is unsupported")
+        if (input.readUnsignedShort() != VERSION) throw IOException("VERSION: wire protocol version 3 is required")
         val type = input.readUnsignedShort()
         val size = input.readInt()
         val flags = input.readInt()

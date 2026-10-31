@@ -2,8 +2,9 @@
 
 ScrcpySend captures Android screen/audio through a permission-gated Shizuku
 service and sends it to ScrcpyRecv on a trusted LAN. Application ID
-`dev.screencopy.sender`, `SCPY` framing and protocol version3 remain independent
-of the display name. Exact schemas/limits are in [PROTOCOL.md](PROTOCOL.md);
+`dev.screencopy.sender` and `SCPY` framing are stable compatibility identifiers.
+Wire protocol version 3 is separate from app release versions.
+Exact schemas/limits are in [PROTOCOL.md](PROTOCOL.md);
 setup, build profiles and release gates are in [README.md](README.md).
 
 ## Trust and endpoint ownership
@@ -51,7 +52,7 @@ Large payloads travel through FDs, not Binder transactions.
 ## SRT / fragmented MP4
 
 ```text
-v3 request + explicit SRT SESSION_ACCEPT
+wire protocol version 3 request + explicit SRT SESSION_ACCEPT
   -> libsrt listener pinned to actual control peer/session
   -> bounded mux actor / Media3 FragmentedMp4Muxer1.11.1
   -> standard fMP4 / cancellable SRT transport
@@ -84,7 +85,7 @@ new session. This does not certify hardware decoder adaptation or rotation.
 
 ## Custom TCP compatibility
 
-The default local profile uses v3 bounded framing, explicit stream configuration
+The default local profile uses wire protocol version 3 bounded framing, explicit stream configuration
 and readiness, internal session/track generations and negotiated codec metadata.
 SRT-enabled builds retain this selectable path. Present unsupported transports
 never choose custom TCP implicitly.

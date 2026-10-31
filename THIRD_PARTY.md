@@ -1,6 +1,6 @@
 # Dependencies and redistribution
 
-The primary backend now uses official **Shizuku API/provider13.1.5**, MIT,
+ScrcpySend's primary capture backend uses official **Shizuku API/provider13.1.5**, MIT,
 published by RikkaApps at Maven Central. Its API/aidl/shared/provider components
 are covered by the bundled `assets/licenses/Shizuku-API-MIT.txt`. Official guide:
 https://github.com/RikkaApps/Shizuku-API (UserService, permission and provider);
@@ -8,20 +8,19 @@ user setup: https://shizuku.rikka.app/guide/setup/.
 Shizuku Manager/server itself is installed separately by the user, not bundled.
 No deprecated `Shizuku.newProcess` is used.
 
-The following legacy ADB review remains relevant to bundled (temporarily
-retained) code/redistribution, **not** the primary Shizuku execution path. It is
-retained until live UserService acceptance to avoid risky deletion of existing
-authorization/keys; there is no hidden ADB fallback behind Shizuku UI.
+Bundled ADB utility code is **not** the primary capture backend. Its dependencies,
+local identity/key storage and redistribution obligations apply to that utility
+code; there is no hidden ADB fallback behind the Shizuku UI.
 
-This app deliberately uses a pairing-capable ADB implementation, not legacy-only
-adblib. Source inspection verified `AbsAdbConnectionManager.pair` delegates to
+The bundled ADB implementation supports pairing.
+`AbsAdbConnectionManager.pair` delegates to
 SPAKE2 + TLS-exporter-bound pairing in `PairingConnectionCtx`; connection uses
-ADB STLS/TLS 1.3. This is code verification, NOT a claim of device pairing success.
+ADB STLS/TLS 1.3. These implementation details do not establish device pairing success.
 The wrapper permits only loopback and rejects legacy plaintext ADB connections.
-ADB's own pairing trust remains required for retained legacy ADB. ScreenCopy v3 receiver traffic is
-plain TCP on a trusted family LAN; it has no TLS certificates or saved peer
+ADB's own pairing trust is required for the ADB utility. ScrcpySend / ScrcpyRecv
+control and media traffic is unencrypted on a trusted family LAN; it has no TLS certificates or saved peer
 credentials. Conscrypt, Bouncy Castle and SPAKE2 remain for local Android ADB,
-not ScreenCopy peer trust.
+not ScrcpySend / ScrcpyRecv peer trust.
 
 | Component | Pin | Terms |
 |---|---|---|
@@ -36,7 +35,7 @@ not ScreenCopy peer trust.
 | JUnit (tests only) | 4.13.2 | EPL-1.0 |
 | org.json (tests only) | 20240303 | Public domain |
 | Mockito (tests only) | 5.15.2 | MIT |
-| libsrt (SRT opt-in trial only; encryption disabled) | 1.5.7 | MPL-2.0 |
+| libsrt (SRT-enabled builds; encryption disabled) | 1.5.7 | MPL-2.0 |
 | AndroidX Media3 common/container/muxer | 1.11.1 | Apache-2.0 |
 | Robolectric / Media3 extractor (host tests only) | 4.16.1 / 1.11.1 | MIT / Apache-2.0 |
 
@@ -51,7 +50,7 @@ The APK bundles the complete upstream MPL text in
 source in `assets/sources/srt-1.5.7.tar.gz` (SHA-256
 `017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b`).
 The archive retains every upstream source-file copyright and license notice;
-ScreenCopy's separate JNI adapter/build integration does not modify libsrt.
+ScrcpySend's separate JNI adapter/build integration does not modify libsrt.
 The Java sender uses Media3 container OpusUtil for packet duration/initialization,
 not an Opus decoder. Media3 common/container and transitive Guava keep their
 upstream Apache-2.0 notices.
@@ -74,7 +73,7 @@ AAC uses actual ASC frameLengthFlag for 1024/960 sample durations. The local
 StreamingCodecConfig adapter calls the unmodified official Av1ConfigUtil to
 serialize actual sequence/metadata OBUs; official Media3 still constructs av1C
 and av01. Codec tests include attributed short upstream Apache-2.0 test vectors.
-No new codec/native dependency, decoder, or copied custom container is bundled.
+No codec decoder or copied custom container is bundled in the streaming module.
 Generated Java sources use a concrete source-set directory, matching AGP 9's
 supported pattern, with an explicit JavaCompile dependency on preparation.
 This module compiles its complete pinned source cohort
@@ -87,15 +86,14 @@ as Format initialization data: upstream interprets nonempty AV1 initialization
 as an already serialized av1C record. Empty muxer Format initialization invokes
 the official record parser from the nonempty real first sample.
 
-ZXing/QR scanning and camera permission were removed with ScreenCopy v1 peer
-pairing. No peer certificate-generation dependency is added. Existing crypto
-dependencies must not be removed: they are needed by Android wireless ADB.
+The LAN protocol does not use QR scanning, camera permission or peer certificate
+generation. Crypto dependencies support the bundled Android wireless ADB utility.
 
 Preserve [the bundled notices](app/src/main/assets/NOTICE.txt),
 [license texts](app/src/main/assets/licenses), source copyrights, and
 [local ADB changes](third_party/libadb/UPSTREAM.md) with distributions. Native
 SPAKE2 and Conscrypt are distributed as pinned AAR dependencies. The first-party
-direct-child capture supervisor now requires **NDK27.2.12479018** and is built for
+direct-child capture supervisor requires **NDK27.2.12479018** and is built for
 arm64-v8a, armeabi-v7a, x86 and x86_64. Its small C source is original first-party
 code, not copied from Shizuku or scrcpy. App/state/UI remain Kotlin; the streaming
 module contains the pinned upstream Java muxer and a narrow Java box helper.
@@ -128,15 +126,14 @@ documented Gradle/NDK requirements, place the resulting AAR locally, replace
 the dependency in `third_party/libadb/build.gradle` with `files(...)`, and run
 the app build. Install a personally re-signed APK; uninstalling the old app may
 be necessary for a different signing key (this deletes pairing credentials).
-There is no signature enforcement in ScreenCopy code preventing replacement.
+There is no signature enforcement in ScrcpySend code preventing library replacement.
 Reverse engineering to debug library modifications is not prohibited.
 
-### Verified native rebuild
+### Native rebuild instructions
 
-The complete source was rebuilt for **arm64-v8a / API 30** using NDK
-27.2.12479018 and CMake 3.22.1. This verifies the actual native inputs, not merely
-ZIP filenames. The app still uses the original pinned AAR, not this verification
-binary. To reproduce in PowerShell after setting `ANDROID_HOME`:
+The app uses the original pinned AAR. To build its complete bundled native source
+for **arm64-v8a / API 30** using NDK27.2.12479018 and CMake3.22.1, run the following
+in PowerShell after setting `ANDROID_HOME`:
 
 ```powershell
 Expand-Archive .\app\src\main\assets\sources\spake2-2.2.1-source.zip .\.gradle\spake2-rebuild -Force
@@ -148,8 +145,8 @@ $cmake = "$env:ANDROID_HOME\cmake\3.22.1\bin\cmake.exe"
 ```
 
 The explicit library output directory is required by upstream's post-build strip
-step when building outside Android Gradle. Other ABIs were not rebuilt in this
-verification; changing a distributed native library still requires appropriate
+step when building outside Android Gradle. The example selects one ABI;
+changing a distributed native library requires appropriate
 ABI builds and the full recombination/distribution materials.
 
 LGPL legal compliance, codec patents, managed-device policy and Play review

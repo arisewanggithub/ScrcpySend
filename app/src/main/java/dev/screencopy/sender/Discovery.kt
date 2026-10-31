@@ -99,7 +99,7 @@ class Discovery(context: Context, private val update: (List<Receiver>) -> Unit, 
             if (bytes.size > 1024) throw IOException("Oversized discovery packet")
             val json = Wire.parseJson(bytes)
             if (Json.string(json, "protocol") != "screencopy" || Json.integer(json, "version") != Wire.VERSION)
-                throw IOException("VERSION: discovery requires ScreenCopy v3")
+                throw IOException("VERSION: discovery requires wire protocol version 3")
             val name = Json.string(json, "name")
             val port = Json.integer(json, "port")
             val state = Json.string(json, "state")
