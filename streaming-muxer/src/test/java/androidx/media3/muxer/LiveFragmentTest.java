@@ -127,6 +127,77 @@ public class LiveFragmentTest {
         StreamingBoxes.traf(videoFormat(), -1, ByteBuffer.allocate(0), ByteBuffer.allocate(0)));
   }
 
+  @Test public void twoHevcSamplesBeforeLiveFlushUseNominalUnknownTailAndRetainReconfiguration()
+      throws Exception {
+    byte[] portrait = hex("0000000140010c01ffff016000000300b0000003000003007bac09"
+        + "00000001420101016000000300b0000003000003007ba00220801e072f96bb9324ba948281010176850940"
+        + "000000014401c0e30f09418f6108");
+    byte[] landscape = hex("0000000140010c01ffff016000000300b0000003000003007bac09"
+        + "00000001420101016000000300b0000003000003007ba003c0801107cb96bb9324ba948281010176850940"
+        + "000000014401c0e30f09418f6108");
+    byte[] irap = hex("000000012601888400");
+    ByteBuffer spsBuffer = AnnexBUtils.findNalUnits(ByteBuffer.wrap(portrait)).get(1);
+    byte[] sps = new byte[spsBuffer.remaining()];
+    spsBuffer.get(sps);
+    NalUnitUtil.H265SpsData dimensions = NalUnitUtil.parseH265SpsNalUnit(sps, 0, sps.length, null);
+    Format format = new Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H265)
+        .setWidth(dimensions.width).setHeight(dimensions.height).setFrameRate(60)
+        .setInitializationData(Arrays.asList(portrait)).build();
+    byte[][] packets = {join(portrait, irap), join(landscape, irap), join(portrait, irap)};
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    FragmentedMp4Muxer muxer = muxer(output);
+    int flushed;
+    try {
+      int video = muxer.addTrack(format);
+      int audio = muxer.addTrack(audioFormat());
+      sample(muxer, video, 0, true, packets[0]);
+      sample(muxer, video, 4_000_123, true, packets[1]);
+      sample(muxer, audio, 100_000, true, OPUS);
+      sample(muxer, audio, 120_000, true, OPUS);
+      muxer.flushFragment(); // No EOS, and deliberately two video samples in one fragment.
+      VideoTiming first = videoTiming(output.toByteArray());
+      assertEquals(Arrays.asList(0L), first.bases);
+      assertEquals(Arrays.asList(Arrays.asList(360_011, 1_500)), first.durations);
+      Parsed partial = parse(output.toByteArray());
+      assertEquals(Arrays.asList(0L, 4_000_122L), partial.video().times);
+
+      sample(muxer, video, 8_000_987, true, packets[2]);
+      sample(muxer, audio, 140_000, true, OPUS);
+      muxer.flushFragment();
+      VideoTiming all = videoTiming(output.toByteArray());
+      assertEquals(Arrays.asList(0L, 720_089L), all.bases);
+      assertEquals(Arrays.asList(Arrays.asList(360_011, 1_500), Arrays.asList(1_500)), all.durations);
+      Parsed parsed = parse(output.toByteArray());
+      assertEquals(Arrays.asList(0L, 4_000_122L, 8_000_988L), parsed.video().times);
+      assertEquals(Arrays.asList(C.BUFFER_FLAG_KEY_FRAME, C.BUFFER_FLAG_KEY_FRAME,
+          C.BUFFER_FLAG_KEY_FRAME), parsed.video().flags);
+      for (int i = 0; i < packets.length; i++) assertArrayEquals(packets[i], parsed.video().samples.get(i));
+      assertEquals(Arrays.asList(100_000L, 120_000L, 140_000L), parsed.audio().times);
+      for (byte[] packet : parsed.audio().samples) assertArrayEquals(OPUS, packet);
+      assertEquals(1, countBoxes(output.toByteArray(), "moov", 0, output.size()));
+      assertEquals(1, countBoxes(output.toByteArray(), "ftyp", 0, output.size()));
+      flushed = output.size();
+    } finally { muxer.close(); }
+    assertEquals(flushed, output.size());
+  }
+
+  @Test public void threeSampleVideoFragmentRetainsPositiveTimestampDerivedDurations()
+      throws Exception {
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    try (FragmentedMp4Muxer muxer = muxer(output)) {
+      int video = muxer.addTrack(videoFormat());
+      sample(muxer, video, 125_000, true, IDR);
+      sample(muxer, video, 4_125_123, false, DELTA);
+      sample(muxer, video, 8_125_987, false, DELTA);
+      muxer.flushFragment();
+      VideoTiming timing = videoTiming(output.toByteArray());
+      assertEquals(Arrays.asList(11_250L), timing.bases);
+      // Positive deltas and upstream's positive duplicated tail are unchanged.
+      assertEquals(Arrays.asList(Arrays.asList(360_011, 360_078, 360_078)), timing.durations);
+      assertEquals(Arrays.asList(125_000L, 4_125_122L, 8_125_988L), parse(output.toByteArray()).video().times);
+    }
+  }
+
   @Test public void avc3RotationRetainsInBandParameterSetsWithOneInitAndRawTimeline() throws Exception {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     byte[] portrait = hex("000000016742001ef40f028c800000000168ce3c800000000165888400");
@@ -390,6 +461,75 @@ public class LiveFragmentTest {
     } while (result != Extractor.RESULT_END_OF_INPUT);
     extractor.release();
     return parsed;
+  }
+
+  private static byte[] join(byte[] first, byte[] second) {
+    byte[] result = Arrays.copyOf(first, first.length + second.length);
+    System.arraycopy(second, 0, result, first.length, second.length);
+    return result;
+  }
+
+  private static int boxEnd(byte[] bytes, int at, int limit) {
+    assertTrue("Truncated box", limit - at >= 8);
+    int size = ByteBuffer.wrap(bytes, at, 4).getInt();
+    assertTrue("Invalid box size", size >= 8 && size <= limit - at);
+    return at + size;
+  }
+
+  private static String boxType(byte[] bytes, int at) {
+    return new String(bytes, at + 4, 4, StandardCharsets.US_ASCII);
+  }
+
+  private static int findBox(byte[] bytes, String type, int start, int limit) {
+    for (int at = start; at < limit; at = boxEnd(bytes, at, limit)) {
+      if (boxType(bytes, at).equals(type)) return at;
+    }
+    return -1;
+  }
+
+  private static int countBoxes(byte[] bytes, String type, int start, int limit) {
+    int count = 0;
+    for (int at = start; at < limit; at = boxEnd(bytes, at, limit)) {
+      if (boxType(bytes, at).equals(type)) count++;
+    }
+    return count;
+  }
+
+  private static final class VideoTiming {
+    final List<Long> bases = new ArrayList<>();
+    final List<List<Integer>> durations = new ArrayList<>();
+  }
+
+  private static VideoTiming videoTiming(byte[] bytes) {
+    VideoTiming result = new VideoTiming();
+    for (int moof = 0; moof < bytes.length; moof = boxEnd(bytes, moof, bytes.length)) {
+      int moofEnd = boxEnd(bytes, moof, bytes.length);
+      if (!boxType(bytes, moof).equals("moof")) continue;
+      for (int traf = moof + 8; traf < moofEnd; traf = boxEnd(bytes, traf, moofEnd)) {
+        int trafEnd = boxEnd(bytes, traf, moofEnd);
+        if (!boxType(bytes, traf).equals("traf")) continue;
+        int tfhd = findBox(bytes, "tfhd", traf + 8, trafEnd);
+        assertTrue(tfhd >= 0);
+        if (ByteBuffer.wrap(bytes, tfhd + 12, 4).getInt() != 1) continue;
+        int tfdt = findBox(bytes, "tfdt", traf + 8, trafEnd);
+        int trun = findBox(bytes, "trun", traf + 8, trafEnd);
+        assertTrue(tfdt >= 0 && trun >= 0);
+        assertEquals(0x01000000, ByteBuffer.wrap(bytes, tfdt + 8, 4).getInt());
+        result.bases.add(ByteBuffer.wrap(bytes, tfdt + 12, 8).getLong());
+        int flags = ByteBuffer.wrap(bytes, trun + 8, 4).getInt() & 0xffffff;
+        assertEquals(0x300, flags & 0x300);
+        int count = ByteBuffer.wrap(bytes, trun + 12, 4).getInt();
+        int cursor = trun + 16 + ((flags & 1) != 0 ? 4 : 0) + ((flags & 4) != 0 ? 4 : 0);
+        List<Integer> durations = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+          durations.add(ByteBuffer.wrap(bytes, cursor, 4).getInt());
+          cursor += 8 + ((flags & 0x400) != 0 ? 4 : 0) + ((flags & 0x800) != 0 ? 4 : 0);
+        }
+        assertEquals(boxEnd(bytes, trun, trafEnd), cursor);
+        result.durations.add(durations);
+      }
+    }
+    return result;
   }
 
   private static final class Parsed implements ExtractorOutput {

@@ -202,10 +202,24 @@ or capture test is selected in either cohort.
 The shared transcript checker requires distinct per-test status **0**, one exact
 JUnit OK summary and one final instrumentation code **-1**. Missing/duplicate
 cases, crashes, failures and skips are rejected by executable fixture tests.
-Disposable CI release/debug AVD configs use `disk.dataPartition.size=2G`;
+Disposable CI release/debug/update-UI AVD configs use `disk.dataPartition.size=2G`;
 duplicate settings are removed after AVD creation and before startup. This is
 the userdata property, not a global partition flag. CI checks 3 GiB free and
 retains filesystem diagnostics; no SDK/system directories are deleted.
+
+The live Media3 extension substitutes nominal declared-frame-rate duration only
+for a zero final video sample with no explicit EOS timestamp. Upstream emits that
+unknown tail for one/two buffered samples. Earlier positive PTS-derived durations,
+positive duplicated tails, explicit EOS timing, NAL bytes and key flags are
+unchanged; Opus/AAC retain their encoded packet durations. This is a container
+correctness fix surfaced by debug fixtures, not an R8 performance claim.
+The `LiveFragmentTest` regressions check exact 90 kHz durations/tfdt and official
+extraction across two-sample HEVC partial flush/in-band reconfiguration and a
+three-sample positive-tail fragment.
+
+```powershell
+.\gradlew.bat :streaming-muxer:testDebugUnitTest --tests androidx.media3.muxer.LiveFragmentTest --no-daemon --console plain
+```
 
 Only the test module supplies Error Prone annotations 2.41.0 and suppresses the
 compiler-only `javax.lang.model.element.Modifier` reference. No production Kotlin

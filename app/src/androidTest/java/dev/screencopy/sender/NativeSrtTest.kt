@@ -115,7 +115,8 @@ class NativeSrtTest {
                                 assertEquals("No composition offset for this fixture", 0, int(cursor))
                                 cursor += 4
                             }
-                            assertTrue("Positive sample duration", duration > 0)
+                            assertTrue("Positive sample duration: track=$track index=$sampleIndex " +
+                                "time=$time tfdt=$baseTime duration=$duration trun=${trun.start}", duration > 0)
                             assertTrue("Sample range must belong to its mdat",
                                 size > 0 && offset >= mdat.payload && offset <= mdat.end &&
                                     size <= mdat.end - offset)

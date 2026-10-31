@@ -45,10 +45,16 @@ def prepareStreamingMuxer = tasks.register('prepareStreamingMuxer') {
         sampleDurations.add(StreamingBoxes.singleSampleDuration(
             track.format, sample, track.videoUnitTimebase()));
       }
-    } else if (sampleDurations.size() == 1 && sampleDurations.get(0) == 0) {
-      sampleDurations = java.util.Collections.singletonList(
-          StreamingBoxes.singleSampleDuration(track.format,
-              pendingSamplesByteBuffer.build().get(0), track.videoUnitTimebase()));
+    } else if (androidx.media3.common.MimeTypes.isVideo(track.format.sampleMimeType)
+        && track.endOfStreamTimestampUs == androidx.media3.common.C.TIME_UNSET
+        && !sampleDurations.isEmpty()
+        && sampleDurations.get(sampleDurations.size() - 1) == 0) {
+      // Upstream returns zero for the unknown tail of one- or two-sample tracks.
+      // Live output needs the declared nominal duration, not a fabricated EOS.
+      sampleDurations = new java.util.ArrayList<>(sampleDurations);
+      int last = sampleDurations.size() - 1;
+      sampleDurations.set(last, StreamingBoxes.singleSampleDuration(track.format,
+          pendingSamplesByteBuffer.build().get(last), track.videoUnitTimebase()));
     }
 
     List<Integer> sampleCompositionTimeOffsets =
