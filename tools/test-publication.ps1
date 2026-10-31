@@ -259,3 +259,10 @@ try {
     if ($env:OS -eq 'Windows_NT') { Remove-Item -LiteralPath "Function:global:$aaptPath" -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $scratch -Recurse -Force
 }
+& $parserBash --noprofile --norc (Join-Path $PSScriptRoot 'test-stop-ci-emulator.sh').Replace('\', '/')
+Assert ($LASTEXITCODE -eq 0) 'Owned emulator shutdown must be bounded and regression tested'
+foreach ($name in @('run-release-smoke.sh', 'run-debug-native-fixtures.sh')) {
+    $cleanupScript = Get-Content (Join-Path $PSScriptRoot $name) -Raw
+    Assert ($cleanupScript -match 'source tools/stop-ci-emulator.sh' -and $cleanupScript -match 'stop_ci_emulator "\$emulator_pid"') 'Disposable emulators must use owned, bounded shutdown'
+    Assert ($cleanupScript -notmatch 'wait "\$emulator_pid"') 'Unbounded emulator wait must not return'
+}
