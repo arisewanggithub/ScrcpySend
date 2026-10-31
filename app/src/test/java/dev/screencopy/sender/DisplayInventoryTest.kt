@@ -3,7 +3,6 @@ package dev.screencopy.sender
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class DisplayInventoryTest {
@@ -106,7 +105,7 @@ class DisplayInventoryTest {
     }
     @Test fun settingsEditorAndFreshProofAndStartupUseTheSameAuthoritativeInventory() {
         val path = Path.of(System.getProperty("senderSources"))
-        val editor = Files.readString(path.resolve("CaptureSettingsEditor.kt"))
+        val editor = readUtf8Strict(path.resolve("CaptureSettingsEditor.kt"))
         assertTrue(editor.contains("spinner(\"displayId\", \"Screen to share\""))
         assertFalse(editor.contains("number(\"displayId\""))
         assertTrue(editor.contains("displayId = selectedDisplayId()"))
@@ -114,16 +113,16 @@ class DisplayInventoryTest {
         assertTrue(editor.contains("dialog !== current"))
         assertTrue(editor.contains("displays.validate(this)"))
         assertTrue(editor.contains("The selected settings apply to the next cast."))
-        val setup = Files.readString(path.resolve("ShizukuSetup.kt"))
+        val setup = readUtf8Strict(path.resolve("ShizukuSetup.kt"))
         assertTrue(setup.contains("displayWorker.execute"))
         assertTrue(setup.contains("owned.remote().displayInventory()"))
         assertTrue(setup.contains("DisplayInventory.fromReport(text).requireAvailable()"))
-        val backend = Files.readString(path.resolve("CaptureBackend.kt"))
+        val backend = readUtf8Strict(path.resolve("CaptureBackend.kt"))
         assertTrue(backend.contains("HardwareEncoders.fromReport(capabilities).listedBy(capabilities).resolve(settings)"))
         assertTrue(backend.contains("DisplayInventory.fromReport(capabilities).validate(resolved)"))
         assertTrue(backend.contains("bridge.validateVideo(checkNotNull(scid), resolved)"))
         assertTrue(backend.contains("return resolved"))
-        assertTrue(Files.readString(path.resolve("ShellCaptureService.kt")).contains("DisplayInventoryDiscovery.read().validate(config)"))
+        assertTrue(readUtf8Strict(path.resolve("ShellCaptureService.kt")).contains("DisplayInventoryDiscovery.read().validate(config)"))
     }
     @Test fun automaticAndExplicitEncoderResolutionPreserveAuthoritativeDisplayCropAndGeometry() {
         val inventory = DisplayInventory(listOf(display(7, width = 2400, height = 1080, rotation = 1)))
@@ -158,7 +157,7 @@ class DisplayInventoryTest {
             val settings = Settings().apply { videoCodec = codec }
             assertEquals(codec, Settings.from(settings.request()).videoCodec)
         }
-        val editor = Files.readString(Path.of(System.getProperty("senderSources"), "CaptureSettingsEditor.kt"))
+        val editor = readUtf8Strict(Path.of(System.getProperty("senderSources"), "CaptureSettingsEditor.kt"))
         assertFalse(editor.contains("reported phone freeze"))
         assertFalse(editor.contains("not verified fixed"))
         assertFalse(editor.contains("unstable"))

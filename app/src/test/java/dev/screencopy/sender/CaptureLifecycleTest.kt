@@ -5,7 +5,6 @@ import org.junit.Test
 import java.io.Closeable
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -74,7 +73,7 @@ class CaptureLifecycleTest {
     }
     @Test fun productionPrivateSocketIsOpenedAfterMediaNeverExportedAndInterruptedBeforeGuardian() {
         val sources = Path.of(System.getProperty("senderSources"))
-        val shell = Files.readString(sources.resolve("ShellCaptureService.kt"))
+        val shell = readUtf8Strict(sources.resolve("ShellCaptureService.kt"))
         val open = shell.substringAfter("override fun openMedia").substringBefore("override fun closeSession")
         assertTrue(open.indexOf("if (last) openLifecycle(id)") < open.indexOf("ParcelFileDescriptor.dup(socket.fileDescriptor)"))
         val lifecycle = open.substringAfter("private fun openLifecycle")

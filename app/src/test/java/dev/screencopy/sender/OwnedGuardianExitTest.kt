@@ -5,7 +5,6 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
@@ -46,7 +45,7 @@ class OwnedGuardianExitTest {
         assertEquals(6, paths.distinct().size)
         assertTrue(paths.all { it.startsWith("/data/local/tmp/screencopy-00000001.jar") })
         assertThrows(IllegalArgumentException::class.java) { CaptureGuardian.artifacts("/data/local/tmp/other", "00000001") }
-        val source = Files.readString(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
+        val source = readUtf8Strict(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
         assertTrue(source.contains("guardianHandle = GuardianHandle(id, child)"))
         assertTrue(source.contains("OwnedGuardianExit.await(guardian.process)"))
         assertTrue(source.indexOf("OwnedGuardianExit.await(guardian.process)") < source.indexOf("file.delete()"))

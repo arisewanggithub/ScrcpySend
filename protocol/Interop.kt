@@ -10,7 +10,6 @@ import org.screencopy.receiver.protocol.Wire as ReceiverWire
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 import java.net.ServerSocket
 import java.util.concurrent.CompletableFuture
@@ -63,7 +62,7 @@ class InteropTest {
 
     @Test fun bothImplementationsAgreeOnSharedBytesAndCodecStartup() {
         val fixtures = Path.of(System.getProperty("fixtures"))
-        val cases = JSONObject(Files.readString(fixtures.resolve("v3.json"))).getJSONArray("cases")
+        val cases = JSONObject(readUtf8Strict(fixtures.resolve("v3.json"))).getJSONArray("cases")
         for (index in 0 until cases.length()) {
             val item = cases.getJSONObject(index)
             val bytes = WireTest.unhex(item.getString("hex"))
@@ -84,7 +83,7 @@ class InteropTest {
                 assertFalse("Receiver rejected ${item.getString("name")}", expected)
             }
         }
-        val head = WireTest.unhex(Files.readString(fixtures.resolve("opus-head.hex")).trim())
+        val head = WireTest.unhex(readUtf8Strict(fixtures.resolve("opus-head.hex")).trim())
         val settings = Settings()
         val accepted = Configuration.audio(cross(Wire.config(1, 2, 1, CodecConfig.audio("opus", head))), request(settings))
         assertEquals(312, accepted.preSkip)
@@ -94,7 +93,7 @@ class InteropTest {
         Configuration.audio(cross(Wire.config(1, 2, 1, CodecConfig.audio("raw", byteArrayOf()))), request(settings))
         settings.audio = false
         assertEquals(listOf(1), request(settings).tracks)
-        val session = JSONObject(Files.readString(fixtures.resolve("session.json")))
+        val session = JSONObject(readUtf8Strict(fixtures.resolve("session.json")))
         val parsedHello = cross(Wire.control(Wire.HELLO, 0, session.getJSONObject("senderHello")))
         assertFalse(parsedHello.has("code")); assertFalse(parsedHello.has("sessionCode"))
         assertEquals(3, parsedHello.getJSONArray("versions").getInt(0))

@@ -11,7 +11,6 @@ import java.io.InputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.nio.file.Files
 import java.nio.file.Path
 
 class CaptureStartupEvidenceTest {
@@ -108,10 +107,10 @@ class CaptureStartupEvidenceTest {
         service.finish(owner)
         assertTrue(ShizukuPolicy.mayReleaseIdle(0, model.snapshot().active != null))
         assertFalse(ShizukuPolicy.mayReleaseIdle(1, false))
-        val source = Files.readString(Path.of(System.getProperty("senderSources"), "CaptureBackend.kt"))
+        val source = readUtf8Strict(Path.of(System.getProperty("senderSources"), "CaptureBackend.kt"))
         val reader = source.substringAfter("worker(\"scrcpy-log\")").substringBefore("worker(\"capture-heartbeat\")")
         assertTrue(reader.contains("serverLog.drain(shell)")); assertFalse(reader.contains("outputStream")); assertFalse(reader.contains("bridge.close"))
-        val serviceSource = Files.readString(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
+        val serviceSource = readUtf8Strict(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
         assertTrue(serviceSource.contains("lifetime.own(java.io.Closeable { child.outputStream.close() })"))
     }
 }

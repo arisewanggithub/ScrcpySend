@@ -2,7 +2,6 @@ package dev.screencopy.sender
 
 import org.junit.Assert.*
 import org.junit.Test
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
 
@@ -168,13 +167,13 @@ class BitratesTest {
     }
     @Test fun realApplyAndPrivilegedStartupAreWiredToSharedValidation() {
         val path = Path.of(System.getProperty("senderSources"))
-        val editor = Files.readString(path.resolve("CaptureSettingsEditor.kt"))
+        val editor = readUtf8Strict(path.resolve("CaptureSettingsEditor.kt"))
         assertTrue(editor.contains("HardwareEncoders.fromReport(proof).listedBy(proof).resolve(this)"))
         assertTrue(editor.contains("Bitrates.validate(resolved, CodecBitrates.fromReport(proof))"))
-        val backend = Files.readString(path.resolve("CaptureBackend.kt"))
+        val backend = readUtf8Strict(path.resolve("CaptureBackend.kt"))
         assertTrue(backend.contains("HardwareEncoders.fromReport(capabilities).listedBy(capabilities).resolve(settings)"))
         assertTrue(backend.contains("Bitrates.validate(resolved, CodecBitrates.fromReport(capabilities))"))
-        val shell = Files.readString(path.resolve("ShellCaptureService.kt"))
+        val shell = readUtf8Strict(path.resolve("ShellCaptureService.kt"))
         assertTrue(shell.contains("CodecBitrateDiscovery.read().report()"))
         assertTrue(shell.contains("Bitrates.validate(config, CodecBitrateDiscovery.read())"))
     }

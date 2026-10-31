@@ -20,7 +20,7 @@ if (providers.gradleProperty('requireReleaseSigning').getOrElse('false').toBoole
 
 android {
     namespace 'dev.screencopy.sender'
-    compileSdk 37
+    compileSdk 36
     defaultConfig {
         applicationId 'dev.screencopy.sender'
         minSdk 30

@@ -6,7 +6,6 @@ import java.io.Closeable
 import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -86,9 +85,9 @@ class CaptureCancellationTest {
 
     @Test fun privilegedStopAndUiLivenessUseSafeProductionSurfaces() {
         val sources = Path.of(System.getProperty("senderSources"))
-        val service = Files.readString(sources.resolve("ShellCaptureService.kt"))
-        val client = Files.readString(sources.resolve("ShizukuClient.kt"))
-        val guardian = Files.readString(sources.resolve("CaptureGuardian.kt"))
+        val service = readUtf8Strict(sources.resolve("ShellCaptureService.kt"))
+        val client = readUtf8Strict(sources.resolve("ShizukuClient.kt"))
+        val guardian = readUtf8Strict(sources.resolve("CaptureGuardian.kt"))
         assertTrue(service.contains("CaptureCancellation.closeDetached"))
         assertTrue(service.contains("CaptureCancellation.closeOwnedProcess(owned.process, owned.guardian)"))
         assertTrue(service.contains("if (id != null && cleanupCommandId == id) return cleanup"))
@@ -100,11 +99,11 @@ class CaptureCancellationTest {
         assertTrue(service.contains("ownerDeath = IBinder.DeathRecipient { terminateService() }"))
         val destroy = service.substringAfter("override fun destroy()")
         assertFalse(destroy.contains("cancelOwned()")); assertTrue(destroy.contains("terminateService()"))
-        val native = Files.readString(sources.resolve("../../../../cpp/supervisor.c").normalize())
+        val native = readUtf8Strict(sources.resolve("../../../../cpp/supervisor.c").normalize())
         assertTrue(native.contains("PR_SET_PDEATHSIG, SIGKILL"))
         assertTrue(native.contains("setsid() < 0")); assertTrue(native.contains("supervisor_isolated(getpid(), getsid(0), getpgrp())"))
         assertTrue(native.indexOf("if (!start_authorized())") < native.indexOf("child = {fork()"))
-        val session = Files.readString(sources.resolve("SenderSession.kt"))
+        val session = readUtf8Strict(sources.resolve("SenderSession.kt"))
         val closingWatchdog = session.substringAfter("private fun watchdog()").substringAfter("if (closing)")
             .substringBefore("if (phaseDeadline")
         assertTrue(closingWatchdog.contains("closeLink()"))

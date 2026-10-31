@@ -3,7 +3,6 @@ package dev.screencopy.sender
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class VideoGeometryTest {
@@ -137,7 +136,7 @@ class VideoGeometryTest {
         assertThrows(IllegalArgumentException::class.java) { Settings().apply { cropHeight = 100 }.validate() }
         assertThrows(IllegalArgumentException::class.java) { Settings().apply { cropX = 1 }.validate() }
         Settings().apply { cropWidth = 100; cropHeight = 100; cropX = 2; cropY = 3 }.validate()
-        val editor = Files.readString(Path.of(System.getProperty("senderSources"), "CaptureSettingsEditor.kt"))
+        val editor = readUtf8Strict(Path.of(System.getProperty("senderSources"), "CaptureSettingsEditor.kt"))
         assertTrue(editor.contains("Crop width (pixels)")); assertTrue(editor.contains("Crop height (pixels)"))
         assertTrue(editor.contains("Set width, height, X and Y to 0"))
         assertTrue(editor.contains("Offsets are measured from the top-left in the display's default orientation."))
@@ -145,14 +144,14 @@ class VideoGeometryTest {
     }
     @Test fun actualBoundaryRunsPrivilegedJointSdkPreflightBeforeNegotiationAndAgainBeforeLaunch() {
         val sources = Path.of(System.getProperty("senderSources"))
-        val backend = Files.readString(sources.resolve("CaptureBackend.kt"))
-        val session = Files.readString(sources.resolve("SenderSession.kt"))
+        val backend = readUtf8Strict(sources.resolve("CaptureBackend.kt"))
+        val session = readUtf8Strict(sources.resolve("SenderSession.kt"))
         assertTrue(backend.contains("bridge.validateVideo(checkNotNull(scid), resolved)"))
         assertTrue(session.indexOf("capture.validate(settings") < session.indexOf("Wire.SESSION_REQUEST"))
-        val service = Files.readString(sources.resolve("ShellCaptureService.kt"))
+        val service = readUtf8Strict(sources.resolve("ShellCaptureService.kt"))
         assertTrue(service.contains("VideoEncoderPreflight.validate(config)"))
         assertTrue(service.contains("HardwareEncoderDiscovery.read().resolve"))
-        val query = Files.readString(sources.resolve("VideoEncoderPreflight.kt"))
+        val query = readUtf8Strict(sources.resolve("VideoEncoderPreflight.kt"))
         assertTrue(query.contains("caps.isSizeSupported")); assertTrue(query.contains("caps.areSizeAndRateSupported"))
         assertTrue(query.contains("getSupportedWidthsFor")); assertTrue(query.contains("getSupportedHeightsFor"))
         assertFalse(query.contains("createEncoderByType")); assertFalse(query.contains(".configure("))

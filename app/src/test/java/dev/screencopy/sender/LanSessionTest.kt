@@ -15,7 +15,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
-import java.nio.file.Files
 import java.nio.file.Path
 
 class LanSessionTest {
@@ -123,7 +122,7 @@ class LanSessionTest {
     }
 
     @Test fun discoveryUsesSourceAddressAndNameWithNoCodeRequirement() {
-        val fixture = Files.readString(Path.of(System.getProperty("fixtures"), "discovery.json"))
+        val fixture = readUtf8Strict(Path.of(System.getProperty("fixtures"), "discovery.json"))
         val forgedHost = JSONObject(fixture).put("host", "198.51.100.99").toString().toByteArray()
         val receiver = Discovery.decode(forgedHost, "192.0.2.12", 10)
         assertEquals("192.0.2.12", receiver.host)

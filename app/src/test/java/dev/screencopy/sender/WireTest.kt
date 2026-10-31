@@ -8,7 +8,6 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.FilterInputStream
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class WireTest {
@@ -22,7 +21,7 @@ class WireTest {
     }
 
     @Test fun sharedFixturesFragmentAndRoundTrip() {
-        val cases = JSONObject(Files.readString(Path.of(System.getProperty("fixtures"), "v3.json"))).getJSONArray("cases")
+        val cases = JSONObject(readUtf8Strict(Path.of(System.getProperty("fixtures"), "v3.json"))).getJSONArray("cases")
         for (index in 0 until cases.length()) {
             val item = cases.getJSONObject(index)
             val data = unhex(item.getString("hex"))
@@ -60,7 +59,7 @@ class WireTest {
         assertThrows(JSONException::class.java) { Json.bool(value, "ok") }
     }
     @Test fun helloFixtureIsCodeFreeButInternalCastSessionIdIsPreserved() {
-        val text = Files.readString(Path.of(System.getProperty("fixtures"), "session.json"))
+        val text = readUtf8Strict(Path.of(System.getProperty("fixtures"), "session.json"))
         val hello = Wire.parseJson(text.toByteArray()).getJSONObject("senderHello")
         assertFalse(hello.has("code")); assertFalse(hello.has("sessionCode"))
         assertEquals(3, hello.getJSONArray("versions").getInt(0))

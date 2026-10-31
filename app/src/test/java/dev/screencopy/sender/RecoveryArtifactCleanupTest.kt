@@ -3,7 +3,6 @@ package dev.screencopy.sender
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class RecoveryArtifactCleanupTest {
@@ -165,7 +164,7 @@ class RecoveryArtifactCleanupTest {
     }
 
     @Test fun serviceReservesRecoveryBeforeIoAndOnlyFinishesAfterSuccessfulCleanup() {
-        val source = Files.readString(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
+        val source = readUtf8Strict(Path.of(System.getProperty("senderSources"), "ShellCaptureService.kt"))
         val recovery = source.substringAfter("val completion = synchronized(lock) {")
         assertTrue(recovery.contains("scope.pendingOperation(id).count != 0L"))
         assertTrue(recovery.indexOf("scope.claim(id)") < recovery.indexOf("RecoveryArtifactCleanup.run"))
@@ -174,11 +173,11 @@ class RecoveryArtifactCleanupTest {
         assertTrue(recovery.indexOf("RecoveryArtifactCleanup.run") < recovery.indexOf("scope.finish(id)"))
         assertTrue(recovery.contains("finally"))
         assertTrue(recovery.contains("completion.countDown()"))
-        val helper = Files.readString(Path.of(System.getProperty("senderSources"), "RecoveryArtifactCleanup.kt"))
+        val helper = readUtf8Strict(Path.of(System.getProperty("senderSources"), "RecoveryArtifactCleanup.kt"))
         assertFalse(helper.contains("ProcessBuilder"))
         assertFalse(helper.contains("Runtime.getRuntime"))
         assertFalse(helper.contains("kill("))
-        val bridge = Files.readString(Path.of(System.getProperty("senderSources"), "CaptureBridge.kt"))
+        val bridge = readUtf8Strict(Path.of(System.getProperty("senderSources"), "CaptureBridge.kt"))
         val legacyCleanup = bridge.substringAfter("override fun cleanup(id: String)").substringBefore("override fun close()")
         assertTrue(legacyCleanup.contains("throw java.io.IOException"))
         assertFalse(legacyCleanup.contains("adb.shell"))

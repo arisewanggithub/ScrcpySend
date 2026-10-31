@@ -1,7 +1,7 @@
 plugins { id 'com.android.library' }
 android {
     namespace 'io.github.muntashirakon.adb'
-    compileSdk 37
+    compileSdk 36
     defaultConfig { minSdk 30 }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8

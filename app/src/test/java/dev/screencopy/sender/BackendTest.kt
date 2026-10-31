@@ -9,7 +9,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class BackendTest {
@@ -44,7 +43,7 @@ class BackendTest {
         }
     }
     @Test fun canonicalOpusMetadataAndRawConfiguration() {
-        val head = WireTest.unhex(Files.readString(Path.of(System.getProperty("fixtures"), "opus-head.hex")).trim())
+        val head = WireTest.unhex(readUtf8Strict(Path.of(System.getProperty("fixtures"), "opus-head.hex")).trim())
         val config = CodecConfig.audio("opus", head)
         assertEquals(48000, config.getInt("sampleRate")); assertEquals(2, config.getInt("channels"))
         assertEquals(6_500_000L, config.getLong("codecDelayNs")); assertEquals(80_000_000L, config.getLong("seekPrerollNs"))
