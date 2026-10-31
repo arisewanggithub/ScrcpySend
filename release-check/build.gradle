@@ -1,0 +1,39 @@
+plugins { id 'com.android.test' }
+
+if (providers.gradleProperty('releaseSmokeTest').getOrElse('false') != 'true') {
+    throw new GradleException('The standalone release-check module is test-mode only')
+}
+
+android {
+    namespace 'dev.scrcpy.releasecheck.sender'
+    compileSdk 36
+    targetProjectPath = ':app'
+    // AGP skips app compileOnly code/mapping and dependency subtraction in this
+    // supported mode. The harness owns its independently optimized Kotlin runtime.
+    experimentalProperties['android.experimental.self-instrumenting'] = true
+    defaultConfig {
+        minSdk 30
+        targetSdk 35
+        testInstrumentationRunner 'dev.scrcpy.releasecheck.ReleaseCheckRunner'
+    }
+    buildTypes {
+        create('release') {
+            debuggable false
+            minifyEnabled true
+            signingConfig = signingConfigs.debug
+            // Standalone TestCreationConfig gathers TEST rules, not proguardFiles.
+            testProguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.test:runner:1.6.2'
+    implementation 'androidx.test.ext:junit:1.2.1'
+    implementation 'junit:junit:4.13.2'
+    implementation 'com.google.errorprone:error_prone_annotations:2.41.0'
+}
