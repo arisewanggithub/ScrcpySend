@@ -1,0 +1,13 @@
+{
+  "java": {
+    "repository": "https://github.com/MuntashirAkon/spake2-java",
+    "revision": "7615ddd680b990e14513ebb66eac4cb0dbf82464",
+    "archiveSha256": "7c8cf3220d9b528a21093b4cc78bd2b4616fba3c3209877d7194aa9e6c149434"
+  },
+  "native": {
+    "repository": "https://github.com/MuntashirAkon/spake2-c",
+    "revision": "0d15933e5ba3e662cb01245a7ac0dc9fca3eac31",
+    "archiveSha256": "0f1ae5da428e4f8ddea49e0e33dcfe07d2ac2114443793b8508bdc4dd48e1eec",
+    "submodulePath": "android/src/main/cpp/spake2-c"
+  }
+}

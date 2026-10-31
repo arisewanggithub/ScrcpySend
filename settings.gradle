@@ -1,0 +1,14 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://jitpack.io"); content { includeGroupByRegex("com\\.github\\.MuntashirAkon.*") } }
+    }
+}
+rootProject.name = "ScreenCopySender"
+include(":app")
+include(":libadb")
+include(":streaming-muxer")
+project(":libadb").projectDir = file("third_party/libadb")

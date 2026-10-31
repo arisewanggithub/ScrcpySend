@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ScrcpySend</string>
+    <string name="casting_channel">ScrcpySend casting</string>
+    <string name="casting_notification">ScrcpySend is sharing your screen</string>
+</resources>

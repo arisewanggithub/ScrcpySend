@@ -1,0 +1,201 @@
+plugins { id 'com.android.application' }
+
+def srtTrial = providers.gradleProperty('srtTrial').getOrElse('false').toBoolean()
+def releaseVersionCode = providers.gradleProperty('releaseVersionCode').getOrElse('1').toInteger()
+if (releaseVersionCode < 1) throw new GradleException('releaseVersionCode must be a positive Android version code')
+def releaseKeystore = providers.gradleProperty('releaseSigningKeystorePath')
+    .orElse(providers.environmentVariable('ANDROID_KEYSTORE_PATH')).getOrElse('')
+def releaseSigning = [
+    keyAlias: providers.environmentVariable('ANDROID_KEY_ALIAS').getOrElse(''),
+    storePassword: providers.environmentVariable('ANDROID_KEYSTORE_PASSWORD').getOrElse(''),
+    keyPassword: providers.environmentVariable('ANDROID_KEY_PASSWORD').getOrElse('')
+]
+def hasReleaseSigning = releaseKeystore && releaseSigning.values().every { it }
+if ((releaseKeystore || releaseSigning.values().any { it }) && !hasReleaseSigning) {
+    throw new GradleException('Incomplete release signing configuration; provide the keystore path and all three signing environment variables')
+}
+if (providers.gradleProperty('requireReleaseSigning').getOrElse('false').toBoolean() && !hasReleaseSigning) {
+    throw new GradleException('Publication requires manually configured release signing; unsigned APK publication is forbidden')
+}
+
+android {
+    namespace 'dev.screencopy.sender'
+    compileSdk 37
+    defaultConfig {
+        applicationId 'dev.screencopy.sender'
+        minSdk 30
+        targetSdk 35
+        versionCode releaseVersionCode
+        versionName providers.gradleProperty('releaseVersionName').getOrElse('1.0')
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    testOptions { unitTests.returnDefaultValues = false }
+    buildFeatures { aidl true; buildConfig true }
+    defaultConfig {
+        buildConfigField 'boolean', 'SRT_TRIAL', srtTrial.toString()
+    }
+    lint { abortOnError true }
+    if (hasReleaseSigning) {
+        signingConfigs {
+            publication {
+                storeFile file(releaseKeystore)
+                keyAlias releaseSigning.keyAlias
+                storePassword releaseSigning.storePassword
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+        buildTypes.release.signingConfig = signingConfigs.publication
+    }
+    ndkVersion '27.2.12479018'
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/supervisorAssets').get().asFile)
+}
+
+if (srtTrial) {
+    android.defaultConfig {
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_STL=c++_static' }
+        }
+    }
+    android.externalNativeBuild {
+        cmake { path file('src/main/srt/CMakeLists.txt'); version '3.22.1' }
+    }
+}
+
+// An executable, not a JNI library: its single-threaded wait ownership is the safety boundary.
+def supervisorAssets = layout.buildDirectory.dir('generated/supervisorAssets')
+tasks.register('buildSupervisor') {
+    inputs.files(fileTree('src/main/cpp'))
+    outputs.dir(supervisorAssets)
+    doLast {
+        def host = System.getProperty('os.name').toLowerCase().contains('windows') ? 'windows-x86_64' :
+            (System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin-x86_64' : 'linux-x86_64')
+        def toolchain = new File(androidComponents.sdkComponents.sdkDirectory.get().asFile, "ndk/27.2.12479018/toolchains/llvm/prebuilt/$host")
+        def compiler = new File(toolchain, "bin/clang" + (host.startsWith('windows') ? '.exe' : ''))
+        if (!compiler.isFile()) throw new GradleException('Install pinned Android NDK 27.2.12479018 to build the capture supervisor')
+        ['arm64-v8a': 'aarch64-linux-android30', 'armeabi-v7a': 'armv7a-linux-androideabi30',
+         'x86_64': 'x86_64-linux-android30', 'x86': 'i686-linux-android30'].each { abi, target ->
+            def output = new File(supervisorAssets.get().asFile, "supervisor/$abi/supervisor")
+            output.parentFile.mkdirs()
+            providers.exec {
+                commandLine compiler, "--target=$target", "--sysroot=${new File(toolchain, 'sysroot')}",
+                    '-std=c11', '-O2', '-fPIE', '-pie', '-Wall', '-Wextra', '-Werror',
+                    '-fstack-protector-strong', '-Wl,-z,relro,-z,now', file('src/main/cpp/supervisor.c'), '-o', output
+            }.result.get().assertNormalExitValue()
+        }
+        ['NOTICE': 'toolchain', 'sysroot/NOTICE': 'sysroot'].each { source, label ->
+            def notice = new File(toolchain, source)
+            if (!notice.isFile()) throw new GradleException("Missing pinned NDK $label redistribution notice")
+            def destination = new File(supervisorAssets.get().asFile, "licenses/NDK-27.2.12479018-$label-NOTICE.txt")
+            destination.parentFile.mkdirs()
+            java.nio.file.Files.copy(notice.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}
+
+tasks.register('testSupervisor') {
+    inputs.files(fileTree('src/main/cpp'), file('src/test/cpp/owned_child_test.c'))
+    doLast {
+        def compiler = new File(androidComponents.sdkComponents.sdkDirectory.get().asFile,
+            'ndk/27.2.12479018/toolchains/llvm/prebuilt/' +
+            (System.getProperty('os.name').toLowerCase().contains('windows') ? 'windows-x86_64/bin/clang.exe' :
+             (System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin-x86_64/bin/clang' : 'linux-x86_64/bin/clang')))
+        def output = layout.buildDirectory.file('supervisorTests/owned-child.wasm').get().asFile
+        output.parentFile.mkdirs()
+        providers.exec {
+            commandLine compiler, '--target=wasm32', '-nostdlib', '-Wall', '-Wextra', '-Werror',
+                '-Wl,--no-entry', '-Wl,--export=run_tests', file('src/test/cpp/owned_child_test.c'), '-o', output
+        }.result.get().assertNormalExitValue()
+        providers.exec {
+            commandLine providers.gradleProperty('nodeExecutable').getOrElse('node'), '-e',
+                "const fs=require('fs'); WebAssembly.instantiate(fs.readFileSync(process.argv[1])).then(x=>{const r=x.instance.exports.run_tests();if(r)throw Error('owned_child regression line '+r);console.log('PASS native supervisor: unsafe PIDs/foreign child/retention/TERM-KILL-before-reap/repeated stop/zombie/EINTR');});",
+                output
+        }.result.get().assertNormalExitValue()
+    }
+}
+
+if (providers.gradleProperty('receiverClasses').isPresent()) {
+    tasks.matching { it.name == 'compileDebugUnitTestKotlin' }.configureEach {
+        source(rootProject.file('protocol/Interop.kt'))
+    }
+}
+
+dependencies {
+    implementation project(':streaming-muxer')
+    implementation 'androidx.media3:media3-common:1.11.1'
+    implementation 'androidx.media3:media3-container:1.11.1'
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+    implementation 'androidx.annotation:annotation:1.9.1'
+    implementation project(':libadb')
+    implementation 'org.bouncycastle:bcpkix-jdk15to18:1.81'
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'org.mockito:mockito-core:5.15.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    if (providers.gradleProperty('receiverClasses').isPresent()) {
+        testImplementation files(providers.gradleProperty('receiverClasses').get())
+    }
+}
+
+tasks.register('verifyBackend') {
+    def server = layout.projectDirectory.file('src/main/assets/scrcpy-server-v3.3.4')
+    inputs.file(server)
+    doLast {
+        if (!server.asFile.exists()) throw new GradleException('Missing pinned server. Run tools\\fetch-backend.ps1.')
+        def actual = java.security.MessageDigest.getInstance('SHA-256').digest(server.asFile.bytes).encodeHex().toString()
+        if (actual != '8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e')
+            throw new GradleException('scrcpy-server checksum mismatch')
+    }
+}
+tasks.register('verifyKotlinSources') {
+    def appJava = fileTree('src') { include '**/*.java' }
+    def harnessJava = rootProject.fileTree('protocol') { include '**/*.java' }
+    inputs.files(appJava, harnessJava)
+    doLast {
+        def remaining = appJava.files + harnessJava.files
+        if (!remaining.isEmpty()) {
+            throw new GradleException('First-party sources must be Kotlin; remaining Java: ' + remaining.join(', '))
+        }
+    }
+}
+tasks.register('verifyPairingSources') {
+    def bundle = layout.projectDirectory.file('src/main/assets/sources/spake2-2.2.1-source.zip')
+    inputs.file(bundle)
+    doLast {
+        def actual = java.security.MessageDigest.getInstance('SHA-256').digest(bundle.asFile.bytes).encodeHex().toString()
+        if (actual != 'a9b546f56190a8a9a9fa2f3bc683d41fabf9ac88681871371fec2eee3a59d9d4')
+            throw new GradleException('Complete SPAKE2 source bundle checksum mismatch')
+        def prefix = 'spake2-java-7615ddd680b990e14513ebb66eac4cb0dbf82464/'
+        new java.util.zip.ZipFile(bundle.asFile).withCloseable { zip ->
+            ['LICENSE', 'SOURCE_ORIGINS.json', 'android/src/main/cpp/CMakeLists.txt', 'android/src/main/cpp/spake2_jni.cpp',
+             'android/src/main/cpp/spake2-c/sha512.c', 'android/src/main/cpp/spake2-c/spake2.c',
+             'android/src/main/cpp/spake2-c/include/spake2/sha512.h', 'android/src/main/cpp/spake2-c/include/spake2/spake2.h',
+             'android/src/main/cpp/spake2-c/LICENSE'].each { name ->
+                def entry = zip.getEntry(prefix + name)
+                if (entry == null || entry.size <= 0) throw new GradleException('Incomplete pairing source: ' + name)
+            }
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn('verifyBackend', 'verifyKotlinSources', 'verifyPairingSources', 'buildSupervisor') }
+tasks.withType(Test).configureEach {
+    dependsOn('testSupervisor')
+    systemProperty 'fixtures', rootProject.file('protocol/fixtures').absolutePath
+    inputs.dir(rootProject.file('protocol/fixtures'))
+    systemProperty 'pairingSources', file('src/main/assets/sources/spake2-2.2.1-source.zip').absolutePath
+    inputs.file(file('src/main/assets/sources/spake2-2.2.1-source.zip'))
+    systemProperty 'senderManifest', file('src/main/AndroidManifest.xml').absolutePath
+    inputs.file(file('src/main/AndroidManifest.xml'))
+    systemProperty 'serverAsset', file('src/main/assets/scrcpy-server-v3.3.4').absolutePath
+    systemProperty 'senderSources', file('src/main/java/dev/screencopy/sender').absolutePath
+    if (providers.gradleProperty('receiverClasses').isPresent()) {
+        testLogging.showStandardStreams = true
+    }
+}

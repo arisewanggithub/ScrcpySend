@@ -1,0 +1,129 @@
+plugins { id 'com.android.library' }
+
+def upstream = rootProject.file('third_party/media3-muxer-1.11.1-sources.jar')
+def checksum = rootProject.file('third_party/media3-muxer-1.11.1-sources.sha256')
+def generated = layout.buildDirectory.dir('generated/upstream')
+def licenseAssets = layout.buildDirectory.dir('generated/licenseAssets')
+tasks.register('prepareStreamingMuxerNotices', Copy) {
+    from(rootProject.file('app/src/main/assets/licenses/scrcpy-Apache-2.0.txt'))
+    into(licenseAssets.map { it.dir('licenses') })
+    rename { 'Media3-Apache-2.0.txt' }
+}
+def prepareStreamingMuxer = tasks.register('prepareStreamingMuxer') {
+    inputs.files(upstream, checksum)
+    inputs.file('build.gradle')
+    outputs.dir(generated)
+    doLast {
+        def actual = java.security.MessageDigest.getInstance('SHA-256').digest(upstream.bytes).encodeHex().toString()
+        if (actual != 'eefa3f69ad13ccc7c59988bd934cc90653fe24ea64f1eb072db5cf9a674ea47e' ||
+            actual != checksum.text.trim()) throw new GradleException('Pinned Media3 muxer source checksum mismatch')
+        copy { from zipTree(upstream); include '**/*.java'; into generated }
+        def replaceOnce = { File file, String before, String after ->
+            def source = file.getText('UTF-8')
+            if (source.indexOf(before) < 0 || source.indexOf(before) != source.lastIndexOf(before))
+                throw new GradleException("Pinned Media3 patch context changed: ${file.name}: ${before.take(120)}")
+            file.setText(source.replace(before, after), 'UTF-8')
+        }
+        def writer = new File(generated.get().asFile, 'androidx/media3/muxer/FragmentedMp4Writer.java')
+        replaceOnce(writer, '''  public void close() throws IOException {
+    try {
+      createFragment();''', '''  public void flushFragment() throws IOException {
+    if (headerCreated) createFragment();
+  }
+
+  public void close() throws IOException {
+    try {
+      createFragment();''')
+        replaceOnce(writer, 'if (track.equals(videoTrack)\n', 'if (track.equals(videoTrack)\n          && !track.pendingSamplesBufferInfo.isEmpty()\n')
+        replaceOnce(writer, 'Boxes.traf(\n', 'StreamingBoxes.traf(\n              currentTrackInfo.trackFormat, currentTrackInfo.firstPresentationTimeUs,\n')
+        replaceOnce(writer, 'trafBoxHeaderSize + tfhdBoxSize + trunBoxSize;', 'trafBoxHeaderSize + tfhdBoxSize + StreamingBoxes.TFDT_BOX_SIZE + trunBoxSize;')
+        replaceOnce(writer, '''    List<Integer> sampleCompositionTimeOffsets =
+''', '''    if (androidx.media3.common.MimeTypes.AUDIO_OPUS.equals(track.format.sampleMimeType)
+        || androidx.media3.common.MimeTypes.AUDIO_AAC.equals(track.format.sampleMimeType)) {
+      sampleDurations = new java.util.ArrayList<>();
+      for (ByteBuffer sample : pendingSamplesByteBuffer.build()) {
+        sampleDurations.add(StreamingBoxes.singleSampleDuration(
+            track.format, sample, track.videoUnitTimebase()));
+      }
+    } else if (sampleDurations.size() == 1 && sampleDurations.get(0) == 0) {
+      sampleDurations = java.util.Collections.singletonList(
+          StreamingBoxes.singleSampleDuration(track.format,
+              pendingSamplesByteBuffer.build().get(0), track.videoUnitTimebase()));
+    }
+
+    List<Integer> sampleCompositionTimeOffsets =
+''')
+        replaceOnce(writer, '''        trackId,
+        track.format,
+        totalSamplesSize,''', '''        trackId,
+        track.format,
+        pendingSamplesBufferInfo.get(0).presentationTimeUs,
+        totalSamplesSize,''')
+        replaceOnce(writer, '    public final int totalSamplesSize;', '    public final long firstPresentationTimeUs;\n    public final int totalSamplesSize;')
+        replaceOnce(writer, '''        Format trackFormat,
+        int totalSamplesSize,''', '''        Format trackFormat,
+        long firstPresentationTimeUs,
+        int totalSamplesSize,''')
+        replaceOnce(writer, '      this.trackFormat = trackFormat;', '      this.trackFormat = trackFormat;\n      this.firstPresentationTimeUs = firstPresentationTimeUs;')
+        def boxes = new File(generated.get().asFile, 'androidx/media3/muxer/Boxes.java')
+        replaceOnce(boxes, '''      case MimeTypes.VIDEO_H264:
+        return "avc1";''', '''      case MimeTypes.VIDEO_H264:
+        return "avc3";''')
+        replaceOnce(boxes, '''      case MimeTypes.VIDEO_H265:
+        return "hvc1";''', '''      case MimeTypes.VIDEO_H265:
+        return "hev1";''')
+        replaceOnce(boxes, '    contents.put((byte) 0x0F);',
+            '''    int temporalLayers = ((vps.get(3) & 0x0E) >> 1) + 1;
+    int temporalNested = vps.get(3) & 1;
+    contents.put((byte) ((temporalLayers << 3) | (temporalNested << 2) | 3));''')
+        replaceOnce(boxes, '''    contents.put(
+        /* src */ csd0,
+        /* offset */ opusHeadSignatureLength,
+        /* length */ csd0.length - opusHeadSignatureLength);''',
+            '''    contents.put(StreamingBoxes.opusSpecificFields(csd0));''')
+        def muxer = new File(generated.get().asFile, 'androidx/media3/muxer/FragmentedMp4Muxer.java')
+        replaceOnce(muxer, '''  @Override
+  public void close() throws MuxerException {''', '''  /** Emits a live fragment without waiting for another keyframe or closing the stream. */
+  public void flushFragment() throws MuxerException {
+    try {
+      fragmentedMp4Writer.flushFragment();
+    } catch (IOException e) {
+      throw new MuxerException("Failed to flush live fragment", e);
+    }
+  }
+
+  @Override
+  public void close() throws MuxerException {''')
+    }
+}
+android {
+    namespace 'androidx.media3.muxer'
+    compileSdk 37
+    defaultConfig { minSdk 26 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    testOptions { unitTests.includeAndroidResources = true }
+    lint { lintConfig = file('lint.xml') }
+    sourceSets.main.java.srcDir(generated.get().asFile)
+    sourceSets.main.assets.srcDir(licenseAssets.get().asFile)
+}
+tasks.named('preBuild').configure { dependsOn('prepareStreamingMuxer', 'prepareStreamingMuxerNotices') }
+tasks.withType(JavaCompile).configureEach {
+    dependsOn(prepareStreamingMuxer)
+    inputs.file('build.gradle')
+    // Regeneration restores and patches one upstream source cohort. Partial recompilation
+    // must not depend on AGP exposing unchanged generated siblings on javac's classpath.
+    options.incremental = false
+}
+dependencies {
+    implementation 'androidx.annotation:annotation:1.9.1'
+    api 'androidx.media3:media3-common:1.11.1'
+    implementation 'androidx.media3:media3-container:1.11.1'
+    compileOnly 'org.checkerframework:checker-qual:3.49.1'
+    compileOnly 'com.google.errorprone:error_prone_annotations:2.41.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    testImplementation 'androidx.media3:media3-extractor:1.11.1'
+}

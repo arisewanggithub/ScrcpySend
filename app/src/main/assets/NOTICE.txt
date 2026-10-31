@@ -1,0 +1,72 @@
+ScreenCopy Sender third-party notices
+
+SRT (libsrt) 1.5.7, Haivision Systems Inc. and contributors
+https://github.com/Haivision/srt/tree/v1.5.7
+Mozilla Public License 2.0, with upstream UDT BSD and MD5 notices.
+Complete upstream MPL: assets/licenses/SRT-1.5.7-MPL-2.0.txt.
+Additional notices: assets/licenses/SRT-1.5.7-NOTICES.txt.
+Complete unmodified corresponding source, with all original notices:
+assets/sources/srt-1.5.7.tar.gz.
+SHA-256 017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b.
+Only the opt-in SRT trial links this library; encryption is disabled.
+
+Shizuku API/provider/aidl/shared 13.1.5
+Copyright (c) 2021 RikkaW. MIT License.
+https://github.com/RikkaApps/Shizuku-API
+Supported UserService/Binder facilities; Manager is user-installed separately.
+Complete MIT text: assets/licenses/Shizuku-API-MIT.txt.
+The legacy ADB dependencies below remain bundled for regression continuity;
+the primary capture UI/session uses Shizuku, not embedded ADB.
+
+scrcpy-server 3.3.4, Genymobile and contributors
+https://github.com/Genymobile/scrcpy/tree/v3.3.4
+Apache License 2.0. Official unmodified server artifact; SHA-256 verified by build.
+
+LibADB Android 3.1.1, Muntashir Al-Islam and contributors
+https://github.com/MuntashirAkon/libadb-android
+Apache-2.0 alternative elected, plus BSD-3-Clause and MIT source portions.
+Copyright 2013 Cameron Gutman; Copyright 2020 Sam Palmer;
+Copyright 2013 Google Inc.; Copyright 2022 Muntashir Al-Islam.
+Original source/attributions and complete COPYING/LICENSES are in third_party/libadb.
+ScreenCopy modifications: bounded receive queues, deadlines/open predicates,
+TLS-state guard, pairing cleanup, partial-buffer EOF handling and redacted peer logging. See UPSTREAM.md.
+
+SPAKE2-Java / spake2-android 2.2.1
+Copyright 2021 Muntashir Al-Islam. GNU LGPL version 3.
+EdDSA-Java portions by str4d and contributors are CC0.
+Exact corresponding source is bundled in assets/sources/spake2-2.2.1-source.zip
+(commit 7615ddd680b990e14513ebb66eac4cb0dbf82464).
+The archive includes native spake2-c sources, headers and notices at submodule
+commit 0d15933e5ba3e662cb01245a7ac0dc9fca3eac31; SOURCE_ORIGINS.json records both pins.
+You may modify/rebuild/replace this library and rebuild/re-sign this application.
+No restriction on reverse engineering for debugging such modifications is imposed.
+See THIRD_PARTY.md for replacement and redistribution requirements.
+
+Conscrypt Android 2.5.3
+Copyright 2016 The Android Open Source Project. Apache License 2.0.
+Includes Apache Harmony/Netty portions and BoringSSL (OpenSSL/ISC/BSD notices).
+https://github.com/google/conscrypt/tree/2.5.3
+
+Bouncy Castle 1.81 (bcprov, bcpkix, bcutil)
+Copyright The Legion of the Bouncy Castle Inc. MIT license.
+https://www.bouncycastle.org/
+
+AndroidX annotations 1.9.1, Android Open Source Project (Apache-2.0).
+AndroidX Media3 common/container/muxer 1.11.1, Android Open Source Project.
+Apache License 2.0. https://github.com/androidx/media/tree/1.11.1
+Muxer source: official Google Maven media3-muxer-1.11.1-sources.jar.
+SHA-256 eefa3f69ad13ccc7c59988bd934cc90653fe24ea64f1eb072db5cf9a674ea47e.
+Local changes: live fragment flush, tfdt/moof offsets, single-video and packet
+Opus/AAC durations, and standard dOps byte order. Original source headers retained.
+StreamingCodecConfig delegates actual AV1 sequence/metadata OBU serialization
+to the unmodified official Media3 Av1ConfigUtil; no new codec library is bundled.
+The upstream source JAR contains no separate NOTICE file.
+Complete Apache license: assets/licenses/Media3-Apache-2.0.txt.
+Transitive Guava is Apache-2.0; preserve its dependency/source notices.
+Kotlin standard library 2.2.10 / JetBrains annotations 13.0 (Apache-2.0).
+Gradle wrapper 9.8.1 is build tooling, Apache-2.0.
+The first-party direct-child capture supervisor is compiled with Android NDK
+27.2.12479018. Toolchain/runtime notices are generated into
+assets/licenses/NDK-27.2.12479018-{toolchain,sysroot}-NOTICE.txt during the build.
+Complete license texts and dependency notices are bundled under assets/licenses.
+No codec patent or app-store approval is granted by these licenses.
