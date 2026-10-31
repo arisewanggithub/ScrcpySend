@@ -128,8 +128,10 @@ Its disposable Linux **API35 x86_64** emulator runs only
 `dev.scrcpy.update.AppUpdateRemoteUiTest`, not capture/Shizuku/codec acceptance
 tests. APKs are built before booting that emulator. Failure/timeout preserves
 partial instrumentation output, targeted test logcat and the original exit
-status; only disposable UI diagnostics are uploaded. Build and test results
+status; that emulator job uploads only disposable UI diagnostics. Build and test results
 must come from the current run, not historical totals.
+CI also retains app/streaming-muxer JUnit XML when available for exact failure
+messages and stacks; this does not upload APKs or signing material.
 
 ## Updates and signed releases
 
