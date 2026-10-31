@@ -199,6 +199,9 @@ process without selecting Play and verifies it survives startup.
 high-level muxer/rotation/payload assertions, run afterward on a fresh emulator
 with debug APKs. They are not claimed as optimized coverage. No hardware fixture
 or capture test is selected in either cohort.
+The shared transcript checker requires distinct per-test status **0**, one exact
+JUnit OK summary and one final instrumentation code **-1**. Missing/duplicate
+cases, crashes, failures and skips are rejected by executable fixture tests.
 
 Only the test module supplies Error Prone annotations 2.41.0 and suppresses the
 compiler-only `javax.lang.model.element.Modifier` reference. No production Kotlin

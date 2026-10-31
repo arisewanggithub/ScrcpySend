@@ -68,7 +68,14 @@ Assert ($testRules -match '(?m)^-repackageclasses dev.scrcpy.releasecheck.intern
 Assert ($workflow -match '-PrequireReleaseSigning=true -PreleaseSmokeTest=false') 'Publisher must explicitly disable smoke signing'
 $smokeScript = Get-Content (Join-Path $PSScriptRoot 'run-release-smoke.sh') -Raw
 Assert ($smokeScript -match 'NativeSrtCheck,dev.scrcpy.releasecheck.SourceCryptoCheck,dev.scrcpy.releasecheck.TargetResourcesCheck' -and $smokeScript -notmatch 'AppUpdateRemoteUiTest|ShizukuDeviceTest|connectedAndroidTest') 'Release smoke must select only standalone checks'
-Assert ($smokeScript -match 'INSTRUMENTATION_STATUS_CODE: -\[234\]' -and $smokeScript -match 'expected=8') 'Smoke tests must reject skips and enforce their executed count'
+Assert ($smokeScript -match 'bash tools/check-instrumentation-result.sh' -and $smokeScript -match 'expected=8') 'Smoke must use the tested result checker and exact count'
+$resultChecker = Get-Content (Join-Path $PSScriptRoot 'check-instrumentation-result.sh') -Raw
+Assert ($resultChecker.Contains('^INSTRUMENTATION_STATUS_CODE: 0$') -and $resultChecker.Contains('^INSTRUMENTATION_CODE: -1$') -and $resultChecker -match 'INSTRUMENTATION_STATUS_CODE: -\[234\]') 'Per-test success is 0; final success is -1; failures/skips must remain rejected'
+$parserBash = if ($env:OS -eq 'Windows_NT') {
+    Join-Path (Split-Path (Split-Path (Get-Command git).Source -Parent) -Parent) 'bin/bash.exe'
+} else { (Get-Command bash).Source }
+& $parserBash --noprofile --norc (Join-Path $PSScriptRoot 'test-run-release-results.sh').Replace('\', '/')
+Assert ($LASTEXITCODE -eq 0) 'Instrumentation parser regression fixtures failed'
 $smokeTestCount = 0
 foreach ($file in (Get-ChildItem (Join-Path $root 'release-check/src/main') -Recurse -File -Filter '*.kt')) {
     $content = Get-Content $file.FullName -Raw
@@ -79,6 +86,7 @@ Assert ($smokeTestCount -eq 8) 'Standalone Source cohort must have exactly eight
 $debugDriver = Get-Content (Join-Path $PSScriptRoot 'run-debug-native-fixtures.sh') -Raw
 $debugTests = Get-Content (Join-Path $root 'app/src/androidTest/java/dev/screencopy/sender/NativeSrtTest.kt') -Raw
 Assert ($debugDriver -match 'expected=6' -and [regex]::Matches($debugTests, '@Test\s+fun\s+').Count -eq 6 -and $debugDriver -match '-e class dev.screencopy.sender.NativeSrtTest ') 'Original six debug-native fixture tests must retain their separate exact cohort'
+Assert ($debugDriver -match 'bash tools/check-instrumentation-result.sh') 'Debug-native results must use the same tested success-code parser'
 $runner = Get-Content (Join-Path $root 'release-check/src/main/java/dev/scrcpy/releasecheck/ReleaseCheckRunner.kt') -Raw
 $target = Get-Content (Join-Path $root 'release-check/src/main/java/dev/scrcpy/releasecheck/TargetApp.kt') -Raw
 Assert ($runner -match 'releaseSmoke' -and $runner -match 'Build.VERSION.SDK_INT == 35' -and $target -match 'FLAG_DEBUGGABLE' -and $target -match 'loader !== harness.classLoader') 'Independent target loader and emulator/non-debuggable guards required'

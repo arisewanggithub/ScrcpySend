@@ -39,7 +39,4 @@ done
 "$adb" -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
 "$adb" -s emulator-5554 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 timeout 300 "$adb" -s emulator-5554 shell am instrument -w -r -e class dev.screencopy.sender.NativeSrtTest dev.screencopy.sender.test/androidx.test.runner.AndroidJUnitRunner > "$output/instrumentation-result.txt" 2>&1
-sed -i 's/\r$//' "$output/instrumentation-result.txt"
-if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE: -[234]|INSTRUMENTATION_CODE: 0' "$output/instrumentation-result.txt"; then exit 1; fi
-grep -Eq "OK \\($expected tests?\\)" "$output/instrumentation-result.txt"
-[[ "$(grep -c '^INSTRUMENTATION_STATUS_CODE: -1$' "$output/instrumentation-result.txt")" == "$expected" ]]
+bash tools/check-instrumentation-result.sh "$output/instrumentation-result.txt" "$expected"
