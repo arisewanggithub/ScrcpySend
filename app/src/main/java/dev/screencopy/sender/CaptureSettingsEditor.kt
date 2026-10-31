@@ -27,7 +27,8 @@ internal class CaptureSettingsEditor(
     private val requireReady: () -> ShizukuSetup.Snapshot, private val active: () -> Boolean,
     private val report: (String) -> Unit,
     private val refreshDisplays: (((Result<DisplayInventory>) -> Unit) -> Unit)? = null,
-    private val onApplied: () -> Unit = {}
+    private val onApplied: () -> Unit = {},
+    private val checkUpdates: (() -> Unit)? = null
 ) {
     private var dialog: AlertDialog? = null
     private var pendingDraft: Bundle? = null
@@ -71,6 +72,12 @@ internal class CaptureSettingsEditor(
         displays = DisplayInventory.fromReport(proof.capabilities)
         displayRefreshing = false; displayError = null
         form = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 16, 24, 16) }
+        checkUpdates?.let { check ->
+            form.addView(Button(activity).apply {
+                text = "Check for updates"
+                setOnClickListener { check() }
+            })
+        }
         fields.clear(); choices.clear(); encoderInfo.clear()
         notice = TextView(activity).apply {
             id = R.id.capture_settings_notice

@@ -115,7 +115,7 @@ class MainActivity : Activity() {
             { request -> startService(Intent(this, CastService::class.java).setAction("stop").putExtra("request", request.token)) },
             applyRuntimeOverride = true)
         editor = CaptureSettingsEditor(this, settings, setup::requireReady, { CastService.active }, ::show,
-            setup::refreshDisplays, { refreshAppliedSettings() })
+            setup::refreshDisplays, { refreshAppliedSettings() }, { updates.checkForUpdates() })
         editor.restore(savedInstanceState?.getBundle("settings_draft"))
         reopenSettings = savedInstanceState?.getBundle("settings_draft")?.getBoolean("open") == true
         root = LinearLayout(this).apply {
@@ -124,12 +124,20 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
         setContentView(ScrollView(this).apply { addView(root) })
-        text(root, getString(R.string.app_name)).textSize = 22f
+        val appHeading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(appHeading)
+        appHeading.addView(TextView(this).apply { text = getString(R.string.app_name); textSize = 22f },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        settingsButton = button(appHeading, "Settings") {
+            if (readiness.ready) editor.show()
+            else AlertDialog.Builder(this).setTitle("Settings")
+                .setItems(arrayOf("Check for updates")) { _, _ -> updates.checkForUpdates() }.show()
+        }.apply { id = R.id.capture_settings }
         updates = dev.scrcpy.update.UpdateUi(this,
             dev.scrcpy.update.UpdateController.get(this, "ScrcpySend", "ScrcpySend.apk"),
             { CastService.active || casting.snapshot().active != null })
-        updates.mount(root)
         updates.restoreState(savedInstanceState?.getBundle("app_update_ui"))
+        updates.returnFocusTo(R.id.capture_settings)
         info = text(root, "")
         appliedSettings = text(root, "").apply { id = R.id.home_applied_settings }
         ignoreSizeAndCrop = CheckBox(this).apply {
@@ -197,7 +205,6 @@ class MainActivity : Activity() {
         mainPanel.addView(heading)
         heading.addView(TextView(this).apply { text = "Receivers"; textSize = 20f },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        settingsButton = button(heading, "Settings") { editor.show() }.apply { id = R.id.capture_settings }
         text(mainPanel, "Trusted family LAN only: no encryption or authentication.")
         empty = text(mainPanel, "No receivers found—open Receiver on the same Wi-Fi")
         retryDiscovery = button(mainPanel, "Retry") { restartDiscovery() }.apply { id = R.id.retry_receiver_discovery }
@@ -269,12 +276,13 @@ class MainActivity : Activity() {
         val effects = ReceiverMainScreen.effects(readiness.ready, visible, owned != null)
         setupPanel.visibility = if (!readiness.ready && owned == null) View.VISIBLE else View.GONE
         mainPanel.visibility = if (ReceiverMainScreen.listVisible(readiness.ready, owned != null)) View.VISIBLE else View.GONE
-        settingsButton.isEnabled = effects.settingsEnabled
+        settingsButton.isEnabled = owned == null
         ignoreSizeAndCrop.isEnabled = current.size.enabled
         refreshAppliedSettings(current)
         window.setFlags(if (effects.keepScreenOn) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0,
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         renderShizuku()
+        updates.refresh()
         empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
         retryDiscovery.visibility = if (readiness.ready && (rows.isEmpty() || discovery == null)) View.VISIBLE else View.GONE
         receiverRows.removeAllViews()
