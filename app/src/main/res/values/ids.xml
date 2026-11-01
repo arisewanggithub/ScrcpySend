@@ -46,4 +46,5 @@
     <item type="id" name="home_ignore_size_crop" />
     <item type="id" name="receiver_rows" />
     <item type="id" name="retry_receiver_discovery" />
+    <item type="id" name="home_installed_version" />
 </resources>

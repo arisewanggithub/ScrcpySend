@@ -124,7 +124,7 @@ The debug app is `app\build\outputs\apk\debug\app-debug.apk`.
 The optional `.\tools\interop.ps1 -ReceiverRoot ..\ScrcpyRecv` reads an already
 built receiver classes JAR; `SCRCPY_RECV_ROOT` can override its sibling default.
 
-CI checks JVM tests, lint, debug builds and unsigned optimized release assembly
+PR CI checks JVM tests, lint, debug builds and unsigned optimized release assembly
 in both transport profiles. Release assembly runs R8/resource shrinking before
 the publisher can use signing secrets; it does not prove runtime compatibility.
 Its disposable Linux **API35 x86_64** emulator runs only
