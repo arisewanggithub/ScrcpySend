@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var installShizukuButton: Button
     private lateinit var helpButton: Button
     private lateinit var settingsButton: Button
+    private lateinit var installedVersion: TextView
     private lateinit var retryDiscovery: Button
     private lateinit var rootConsent: CheckBox
     private lateinit var ignoreSizeAndCrop: CheckBox
@@ -126,7 +127,10 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
         val appHeading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         root.addView(appHeading)
-        appHeading.addView(TextView(this).apply { text = getString(R.string.app_name); textSize = 22f },
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        text(brand, getString(R.string.app_name)).textSize = 22f
+        installedVersion = text(brand, "").apply { id = R.id.home_installed_version; textSize = 14f }
+        appHeading.addView(brand,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         settingsButton = button(appHeading, "Settings") {
             if (readiness.ready) editor.show()
@@ -138,6 +142,7 @@ class MainActivity : Activity() {
             { CastService.active || casting.snapshot().active != null })
         updates.restoreState(savedInstanceState?.getBundle("app_update_ui"))
         updates.returnFocusTo(R.id.capture_settings)
+        refreshVersion()
         info = text(root, "")
         appliedSettings = text(root, "").apply { id = R.id.home_applied_settings }
         ignoreSizeAndCrop = CheckBox(this).apply {
@@ -283,6 +288,7 @@ class MainActivity : Activity() {
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         renderShizuku()
         updates.refresh()
+        refreshVersion()
         empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
         retryDiscovery.visibility = if (readiness.ready && (rows.isEmpty() || discovery == null)) View.VISIBLE else View.GONE
         receiverRows.removeAllViews()
@@ -355,9 +361,9 @@ class MainActivity : Activity() {
         setup.observe(setupObserver); listBinding.attach()
         render(); reconcileShizuku()
     }
-    override fun onResume() { super.onResume(); updates.resume(); refreshAppliedSettings(); reconcileShizuku() }
+    override fun onResume() { super.onResume(); updates.resume(); refreshVersion(); refreshAppliedSettings(); reconcileShizuku() }
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (updates.onActivityResult(requestCode, resultCode, data)) return
+        if (updates.onActivityResult(requestCode, resultCode, data)) { refreshVersion(); return }
         super.onActivityResult(requestCode, resultCode, data)
     }
     override fun onStop() {
@@ -380,6 +386,7 @@ class MainActivity : Activity() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         editor.dismiss(); super.onDestroy()
     }
+    private fun refreshVersion() { installedVersion.text = getString(R.string.installed_version, updates.installedVersion) }
     private fun panel(parent: LinearLayout, viewId: Int) = LinearLayout(this).apply {
         id = viewId; orientation = LinearLayout.VERTICAL; isSaveEnabled = false; parent.addView(this)
     }
