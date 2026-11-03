@@ -15,7 +15,7 @@ class ScrcpyAudioTest {
             Triple("opus", 0x6f707573, WireTest.unhex("4f707573486561640102380180bb0000000000")),
             Triple("aac", 0x00616163, byteArrayOf(0x11, 0x90.toByte())),
             Triple("raw", 0x00726177, byteArrayOf()))) {
-            val settings = Settings().apply { audioCodec = codec }
+            val settings = Settings().apply { if (codec != "raw") audioCodec = codec }
             val bytes = ByteArrayOutputStream()
             val pts = 18_000_000_000L
             DataOutputStream(bytes).apply {
@@ -30,6 +30,10 @@ class ScrcpyAudioTest {
                     override fun config(track: Int, generation: Int, config: JSONObject) {
                         assertEquals(codec, config.getString("codec"))
                         assertEquals(48000, config.getInt("sampleRate")); assertEquals(2, config.getInt("channels"))
+                        if (codec == "raw") {
+                            assertEquals("s16le", config.getString("sampleFormat"))
+                            assertEquals(0, config.getJSONArray("csd").length())
+                        }
                         mux.offer(Wire.config(1, track, generation, config))
                     }
                     override fun packet(packet: Wire.Message) { mux.offer(packet) }

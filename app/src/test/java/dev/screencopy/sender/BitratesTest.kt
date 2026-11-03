@@ -95,7 +95,7 @@ class BitratesTest {
             assertEquals(before, settings.request().toString())
             assertEquals(rate, Settings.from(settings.request()).audioBitrate)
         }
-        assertEquals("opus", Settings().audioCodec)
+        assertEquals("raw", Settings().audioCodec)
         assertEquals(192_000, Settings().audioBitrate)
         assertTrue(Settings().audio)
         val filtered = Bitrates.audioChoices("aac", "encoder", 192_000, ranges("aac", min = 160_000, max = 256_000))

@@ -20,7 +20,7 @@ class BackendTest {
     }
     @Test fun defaultsPersistExactlyAndShellArgumentsAreStructured() {
         val settings = Settings()
-        assertTrue(settings.audio); assertEquals("opus", settings.audioCodec)
+        assertTrue(settings.audio); assertEquals("raw", settings.audioCodec)
         assertEquals(192000, settings.audioBitrate); assertEquals("h264", settings.videoCodec)
         settings.cropWidth = 400; settings.cropHeight = 600; settings.cropX = 10; settings.cropY = 20
         settings.orientation = "@90"; settings.displayId = 2
@@ -28,12 +28,14 @@ class BackendTest {
         val restored = Settings.from(settings.request())
         assertEquals(settings.request().toString(), restored.request().toString())
         val args = CaptureBackend.options(restored, "00000001")
-        for (expected in listOf(" audio_bit_rate=192000", " crop=400:600:10:20", " capture_orientation=@90",
+        for (expected in listOf(" audio_codec=raw", " crop=400:600:10:20", " capture_orientation=@90",
             " downsize_on_error=false", " control=true", " power_on=false", " clipboard_autosync=false", "max-bframes=0")) assertTrue(args.contains(expected))
         val guardian = CaptureGuardian.arguments(settings, "00000001", "/data/local/tmp/screencopy-00000001.jar")
         assertEquals("/data/local/tmp/screencopy-00000001.jar.supervisor", guardian.first())
         assertEquals(CaptureBackend.VERSION, guardian[2])
-        assertTrue(guardian.contains("audio_bit_rate=192000"))
+        assertTrue(guardian.contains("audio_codec=raw"))
+        assertFalse(guardian.any { it.startsWith("audio_bit_rate=") || it.startsWith("audio_encoder=") ||
+            it.startsWith("audio_codec_options=") })
         assertFalse(guardian.any { it.contains("kill ") || it == "sh" })
         assertEquals(6, CaptureGuardian.artifacts("/data/local/tmp/screencopy-00000001.jar", "00000001").size)
         assertThrows(IllegalArgumentException::class.java) { CaptureGuardian.arguments(settings, "00000001", "/unowned/file") }
@@ -62,7 +64,7 @@ class BackendTest {
         val configs = mutableListOf<JSONObject>()
         val packets = mutableListOf<Wire.Message>()
         assertThrows(EOFException::class.java) {
-            ScrcpyAdapter.read(ByteArrayInputStream(bytes.toByteArray()), 2, Settings(), 1, object : ScrcpyAdapter.Sink {
+            ScrcpyAdapter.read(ByteArrayInputStream(bytes.toByteArray()), 2, Settings().apply { audioCodec = "opus" }, 1, object : ScrcpyAdapter.Sink {
                 override fun config(track: Int, generation: Int, config: JSONObject) { configs.add(config) }
                 override fun packet(packet: Wire.Message) { packets.add(packet) }
             })

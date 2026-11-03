@@ -2,11 +2,25 @@
 
 ScrcpySend and ScrcpyRecv use the stable Android application IDs `dev.screencopy.sender` and `org.screencopy.receiver`, respectively. In-place upgrades preserve app data only with the same application ID and signing certificate. They are independent projects, not official scrcpy applications; upstream attribution is provided in the third-party notices.
 
-## Remote-only flow
+## Touch and remote flow
 
 Both home screens show the actual installed app version, without update status controls. Each fresh launch checks silently once; rotation and ordinary resume do not start another check. Only a successful check for a newer version opens the popup, after casting is idle. **Later** or Back dismisses it for that launch. Failed checks are logged without a popup; GitHub cooldowns still apply. The receiver has no Settings/update entry. Sender capture Settings still provides a manual check. D-pad/Center/OK navigation has visible focus.
 
-The popup has exactly two actions: **Download and install update** and **Later**. One explicit primary-action press downloads, verifies, and opens Android's installer when permitted and idle. The same primary button represents install permission or retry when needed. Later/Back also cancels an in-flight download. Consent survives rotation within the running process, never process restart or a fresh launch. Partial files are never installable. After a user-initiated installation attempt, the completed APK is retained across process restart but must be verified again on explicit retry.
+Touch taps activate buttons on the first tap; they do not first select them.
+Buttons retain normal focus for D-pad/keyboard navigation but are not focusable
+in Android touch mode. Android switches between these input modes automatically,
+including when a remote and touchscreen are used on the same device.
+
+The popup has two update decisions: **Download and install update** and **Later**. One explicit primary-action press downloads, verifies, and opens Android's installer when permitted and idle. The same primary button represents install permission or retry when needed. Later/Back also cancels an in-flight download. Consent survives rotation within the running process, never process restart or a fresh launch. Partial files are never installable. After a user-initiated installation attempt, the completed APK is retained across process restart but must be verified again on explicit retry.
+
+ScrcpySend separates Current version and Available version into labeled rows,
+emphasizes live update status, and uses smaller explanatory text. A separate
+**Show details / Hide details** disclosure expands source, verification and
+Android installer notes without downloading, verifying or installing anything.
+Its expansion state survives activity recreation. The primary update action is
+visually distinct from Later; both retain large touch targets and visible
+D-pad focus. Down from the primary action still selects Later; Up reaches
+the details disclosure. Expanded content remains scrollable.
 
 Installing requires an idle cast; the updater never stops capture or playback. **Allow installs** opens Android's app-scoped permission settings. Returning with permission granted continues only the existing explicit request in that process; after process loss a new action is required. Android's installer and Play Protect confirmations remain under user control. This is not a root/Shizuku/silent installer. Missing OEM activities show actionable errors. No notification permission or browser is needed.
 

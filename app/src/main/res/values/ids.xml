@@ -6,6 +6,12 @@
     <item type="id" name="capture_display" />
     <item type="id" name="capture_settings_notice" />
     <item type="id" name="capture_settings_scroll" />
+    <item type="id" name="capture_settings_advanced" />
+    <item type="id" name="capture_settings_toggle_advanced" />
+    <item type="id" name="capture_video_options" />
+    <item type="id" name="capture_audio_options" />
+    <item type="id" name="capture_audio_enabled" />
+    <item type="id" name="capture_audio_source" />
     <item type="id" name="refresh_capture_displays" />
     <item type="id" name="crop_width" />
     <item type="id" name="crop_height" />
@@ -43,6 +49,13 @@
     <item type="id" name="shizuku_connect" />
     <item type="id" name="capture_settings" />
     <item type="id" name="home_applied_settings" />
+    <item type="id" name="home_applied_settings_heading" />
+    <item type="id" name="home_capture_settings" />
+    <item type="id" name="home_status" />
+    <item type="id" name="home_status_message" />
+    <item type="id" name="home_status_details" />
+    <item type="id" name="home_size_notice" />
+    <item type="id" name="home_scroll" />
     <item type="id" name="home_ignore_size_crop" />
     <item type="id" name="receiver_rows" />
     <item type="id" name="retry_receiver_discovery" />

@@ -6,10 +6,16 @@ import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.TextUtils
+import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
@@ -19,6 +25,7 @@ import android.widget.TextView
 import rikka.shizuku.Shizuku
 
 class MainActivity : Activity() {
+    private lateinit var ui: SenderUi
     private lateinit var updates: dev.scrcpy.update.UpdateUi
     private lateinit var root: LinearLayout
     private lateinit var setupPanel: LinearLayout
@@ -26,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var receiverRows: LinearLayout
     private lateinit var empty: TextView
     private lateinit var info: TextView
+    private lateinit var statusPanel: LinearLayout
     private lateinit var connectionNotice: TextView
     private lateinit var setupInstructions: TextView
     private lateinit var connectButton: Button
@@ -40,6 +48,7 @@ class MainActivity : Activity() {
     private lateinit var rootConsent: CheckBox
     private lateinit var ignoreSizeAndCrop: CheckBox
     private lateinit var appliedSettings: TextView
+    private lateinit var appliedSettingsHeading: TextView
     private lateinit var sizeNotice: TextView
     private var renderingSize = false
     private lateinit var autoConnect: ShizukuAutoConnect
@@ -87,7 +96,7 @@ class MainActivity : Activity() {
                 if (request != null && request != shownRequest) {
                     shownRequest = request
                     shownError = ""
-                    if (current.error.isEmpty()) info.text = ""
+                    if (current.error.isEmpty()) show("")
                 }
                 if (current.error.isNotEmpty() && current.error != shownError) { shownError = current.error; show(current.error) }
                 render(current, rows)
@@ -98,6 +107,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ui = SenderUi(this)
         autoConnect = lastNonConfigurationInstance as? ShizukuAutoConnect
             ?: ShizukuAutoConnect(savedInstanceState?.getBoolean("shizuku_auto_paused") ?: false)
         permissionTicket = autoConnect.pendingPermission
@@ -121,15 +131,30 @@ class MainActivity : Activity() {
         reopenSettings = savedInstanceState?.getBundle("settings_draft")?.getBoolean("open") == true
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
+            val pad = ui.dp(16)
             setPadding(pad, pad, pad, pad)
         }
-        setContentView(ScrollView(this).apply { addView(root) })
-        val appHeading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val scroll = ScrollView(this).apply {
+            id = R.id.home_scroll
+            isFillViewport = true
+            addView(root)
+            setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+        }
+        setContentView(scroll)
+        window.insetsController?.setSystemBarsAppearance(
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS)
+        val appHeading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         root.addView(appHeading)
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        text(brand, getString(R.string.app_name)).textSize = 22f
-        installedVersion = text(brand, "").apply { id = R.id.home_installed_version; textSize = 14f }
+        ui.heading(brand, getString(R.string.app_name)).textSize = 26f
+        installedVersion = text(brand, "").apply { id = R.id.home_installed_version }
         appHeading.addView(brand,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         settingsButton = button(appHeading, "Settings") {
@@ -143,11 +168,40 @@ class MainActivity : Activity() {
         updates.restoreState(savedInstanceState?.getBundle("app_update_ui"))
         updates.returnFocusTo(R.id.capture_settings)
         refreshVersion()
-        info = text(root, "")
-        appliedSettings = text(root, "").apply { id = R.id.home_applied_settings }
+        statusPanel = card(R.id.home_status).also(root::addView)
+        val statusHeading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        statusPanel.addView(statusHeading)
+        ui.heading(statusHeading, "Status").layoutParams =
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        button(statusHeading, "Details") {
+            AlertDialog.Builder(this).setTitle("Session details").setMessage(info.text)
+                .setPositiveButton("OK", null).show()
+        }.id = R.id.home_status_details
+        info = ui.body(statusPanel, "").apply {
+            id = R.id.home_status_message
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        statusPanel.visibility = View.GONE
+        val capturePanel = card(R.id.home_capture_settings)
+        appliedSettingsHeading = ui.heading(capturePanel, "").apply { id = R.id.home_applied_settings_heading }
+        appliedSettings = ui.body(capturePanel, "").apply { id = R.id.home_applied_settings }
         ignoreSizeAndCrop = CheckBox(this).apply {
             id = R.id.home_ignore_size_crop
-            text = "Ignore size and crop (full screen)"
+            text = "Use full screen"
+            textSize = 16f
+            setTextColor(ui.primaryTextColor)
+            setTypeface(typeface, Typeface.BOLD)
+            minimumHeight = ui.dp(48)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(paddingLeft, ui.dp(4), paddingRight, ui.dp(4))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = ui.dp(8) }
             isSaveEnabled = false
             isChecked = casting.snapshot().size.requested
             setOnCheckedChangeListener { _, checked ->
@@ -165,14 +219,20 @@ class MainActivity : Activity() {
                 }
             }
         }
-        root.addView(ignoreSizeAndCrop)
-        sizeNotice = text(root, "")
-        text(root, "Saved settings remain unchanged. While sharing, a size switch explicitly authorizes one clean Stop and new Play to the same receiver. Requests shown, not measured encoder output; automatic encoders resolve before capture.")
+        capturePanel.addView(ignoreSizeAndCrop)
+        text(capturePanel, "Ignores saved size/crop without overwriting them. Switching while casting stops and restarts the same receiver.")
+        sizeNotice = text(capturePanel, "").apply {
+            id = R.id.home_size_notice
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        text(capturePanel, "Requested settings, not measured output. Automatic encoders are chosen before capture.")
         if (casting.snapshot().active == null) SenderFailureStore.read(this)?.let(::show)
-        setupPanel = panel(root, R.id.adb_step)
-        text(setupPanel, "Shizuku").textSize = 20f
+        setupPanel = card(R.id.adb_step).also(root::addView)
+        ui.heading(setupPanel, "Shizuku setup")
         setupInstructions = text(setupPanel, "Install/start Shizuku separately and allow ScrcpySend. Non-root users restart it after reboot. No pairing ports/codes are entered here.")
-        connectionNotice = text(setupPanel, "")
+        connectionNotice = ui.body(setupPanel, "").apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
         rootConsent = CheckBox(this).apply {
             text = "I explicitly allow root-mode Shizuku (not required; shell mode recommended)"
             isSaveEnabled = false
@@ -205,15 +265,13 @@ class MainActivity : Activity() {
                 "Install official Shizuku, start it using its Wireless debugging guide or computer ADB, then grant ScrcpySend permission. Restart after reboot on non-root devices. Root is not required. This app never pairs, approves permissions or changes Developer options for you. Available authorization triggers an actual privileged backend check automatically.")
                 .setPositiveButton("OK", null).show()
         }
-        mainPanel = panel(root, R.id.receiver_step)
-        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        mainPanel.addView(heading)
-        heading.addView(TextView(this).apply { text = "Receivers"; textSize = 20f },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        mainPanel = card(R.id.receiver_step).also(root::addView)
+        ui.heading(mainPanel, "Receivers")
         text(mainPanel, "Trusted family LAN only: no encryption or authentication.")
         empty = text(mainPanel, "No receivers found—open Receiver on the same Wi-Fi")
         retryDiscovery = button(mainPanel, "Retry") { restartDiscovery() }.apply { id = R.id.retry_receiver_discovery }
         receiverRows = panel(mainPanel, R.id.receiver_rows)
+        root.addView(capturePanel)
         render()
     }
 
@@ -293,11 +351,19 @@ class MainActivity : Activity() {
         retryDiscovery.visibility = if (readiness.ready && (rows.isEmpty() || discovery == null)) View.VISIBLE else View.GONE
         receiverRows.removeAllViews()
         rows.forEach { row ->
-            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val line = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8))
+                background = surface()
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = ui.dp(8) }
+            }
             val description = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            text(description, row.target.name)
+            ui.label(description, row.target.name).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
             text(description, row.target.host)
-            if (row.detail.isNotEmpty()) text(description, row.detail)
+            if (row.detail.isNotEmpty()) ui.body(description, row.detail)
             line.addView(description, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             button(line, row.label) {
                 rowActions.press(ReceiverKey.of(row.target), row.requestToken, row.revision)
@@ -390,9 +456,25 @@ class MainActivity : Activity() {
     private fun panel(parent: LinearLayout, viewId: Int) = LinearLayout(this).apply {
         id = viewId; orientation = LinearLayout.VERTICAL; isSaveEnabled = false; parent.addView(this)
     }
-    private fun text(parent: LinearLayout, value: String) = TextView(this).apply { text = value; parent.addView(this) }
+    private fun surface() = GradientDrawable().apply {
+        setColor(ui.surfaceColor)
+        cornerRadius = ui.dp(12).toFloat()
+        setStroke(ui.dp(1), ui.outlineColor)
+    }
+    private fun card(viewId: Int) = LinearLayout(this).apply {
+        id = viewId
+        orientation = LinearLayout.VERTICAL
+        isSaveEnabled = false
+        background = surface()
+        setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = ui.dp(16) }
+    }
+    private fun text(parent: LinearLayout, value: String) = ui.description(parent, value)
     private fun button(parent: LinearLayout, label: String, action: () -> Unit) = Button(this).apply {
         text = label; isAllCaps = false
+        minimumHeight = ui.dp(48)
         setOnClickListener {
             try { action() }
             catch (e: ActivityNotFoundException) { show("No application can open this action. Use https://shizuku.rikka.app/download/ or open Shizuku manually.") }
@@ -421,18 +503,23 @@ class MainActivity : Activity() {
                 else if (active != null && !current.size.enabled && !current.size.busy && current.size.message.isEmpty())
                     "Size switching becomes available when the cast is playing."
                 else null).joinToString("\n")
+            sizeNotice.visibility = if (sizeNotice.text.isEmpty()) View.GONE else View.VISIBLE
         }
         val heading = if (active == null) "Applied settings — next cast" else "Active cast request"
+        appliedSettingsHeading.text = heading
         appliedSettings.text = try {
             val effective = if (active == null)
                 HomeCaptureSettings.effective(settings.readForEditing(), current.size.requested)
             else Settings.from(Wire.parseJson(active.appliedRequest.settings.toByteArray(Charsets.UTF_8)))
             val fullScreen = if (active == null) current.size.requested
                 else current.size.applied
-            "$heading\n${HomeCaptureSettings.summary(effective, fullScreen)}"
+            HomeCaptureSettings.summary(effective, fullScreen)
         } catch (e: Exception) {
-            "$heading\nUnavailable: ${safe(e)}"
+            "Unavailable: ${safe(e)}"
         }
     }
-    private fun show(message: String) { info.text = message }
+    private fun show(message: String) {
+        info.text = message
+        statusPanel.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+    }
 }

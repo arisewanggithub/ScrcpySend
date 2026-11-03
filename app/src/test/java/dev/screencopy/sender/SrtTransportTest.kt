@@ -146,7 +146,7 @@ class SrtTransportTest {
                 mediaTransportMode = mode; maxFps = 30; videoBitrate = 20_000_000
                 receiverOrientation = "landscape"; orientation = "@90"
                 cropWidth = 640; cropHeight = 480; cropX = 12; cropY = 24
-                audioBitrate = 128_000; audioSource = "mic"
+                audioCodec = "opus"; audioBitrate = 128_000; audioSource = "mic"
             }.request().toString()
             val prefs = Mockito.mock(SharedPreferences::class.java)
             Mockito.`when`(prefs.getString("capture", null)).thenReturn(saved)

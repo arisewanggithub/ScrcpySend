@@ -53,7 +53,7 @@ class HomeCaptureSettingsTest {
         assertFalse(disabled.contains("Audio encoder"))
         saved.audio = true; saved.mediaTransportMode = "custom"; saved.audioCodec = "raw"
         val pcm = HomeCaptureSettings.summary(saved)
-        assertTrue(pcm.contains("Audio codec: Raw PCM"))
+        assertFalse(pcm.contains("Audio codec:"))
         assertTrue(pcm.contains("Audio source: mic"))
         assertFalse(pcm.contains("Audio bitrate"))
         assertFalse(pcm.contains("Audio encoder"))

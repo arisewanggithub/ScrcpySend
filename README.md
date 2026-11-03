@@ -22,6 +22,15 @@ separate from application release versions.
 - SRT supports **H.264, H.265 or AV1**, with **Opus, AAC-LC or audio off**.
   PCM is available through custom TCP, not SRT. Unsupported requests fail
   explicitly without changing the user's codec, quality or audio selection.
+- New Custom TCP settings default to **RAW PCM** (48 kHz, stereo, 16-bit
+  little-endian; 1.536 Mbps). RAW bypasses audio encoding and has no selectable
+  compression bitrate. New SRT settings default to Opus; SRT/fMP4 cannot carry
+  RAW in this app. Existing saved AAC/Opus selections are preserved: choose
+  `raw` in Settings and Apply, or Reset defaults and Apply, to opt in.
+  The settings editor hides RAW for SRT. Switching from RAW to SRT selects Opus
+  (an existing Opus/AAC choice is retained); switching to Custom TCP restores
+  RAW and selects it. A codec change resets its encoder and codec options.
+  These are visible draft changes saved only with Apply, not runtime fallbacks.
 - The SRT build includes custom TCP compatibility. Local builds enable SRT
   with `-PsrtTrial=true`; the default build profile is custom TCP.
 - SRT fragments flush on a bounded timer, including static-video/audio-only
@@ -75,8 +84,22 @@ cast keeps its immutable applied configuration. Settings are disabled during
 startup, playback and teardown. Unsupported selections fail without a hidden
 fallback or automatic preference rewrite.
 
-**Ignore size and crop (full screen)** is a runtime choice shared by the home
-screen and notification. It does not rewrite saved settings. Switching between
+The editor groups settings into Connection, Video, Screen & layout, Audio and
+Advanced sections. Bold setting labels are separate from smaller explanatory
+text. Advanced codec options are collapsed by default, open automatically when
+saved options exist or option validation fails, and retain their values when
+collapsed. Expansion state survives draft recreation. Audio controls are disabled
+while audio is off, without clearing the selected settings. Apply/Close remain
+outside the scrolling form.
+
+Home uses the same heading, label and description styles, with separate cards
+for status notices, Shizuku setup, receivers and the next/active cast settings.
+Receiver names are emphasized above addresses and state details. Long notices
+show a three-line preview with the complete message available through Details.
+The home layout respects system-bar and display-cutout insets.
+
+**Use full screen** on home is the size/crop runtime choice also available in
+the notification. It does not rewrite saved settings. Switching between
 full-screen and saved size/crop during a cast explicitly performs owned Stop
 and a new Play after acknowledgement/cleanup, rather than changing a live
 encoder. Failures require a fresh user action.
