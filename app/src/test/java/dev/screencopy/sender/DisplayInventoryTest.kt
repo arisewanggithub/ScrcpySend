@@ -112,7 +112,7 @@ class DisplayInventoryTest {
         assertTrue(editor.contains("activity.runOnUiThread"))
         assertTrue(editor.contains("dialog !== current"))
         assertTrue(editor.contains("displays.validate(this)"))
-        assertTrue(editor.contains("The selected settings apply to the next cast."))
+        assertTrue(editor.contains("Changes apply to the next cast."))
         val setup = readUtf8Strict(path.resolve("ShizukuSetup.kt"))
         assertTrue(setup.contains("displayWorker.execute"))
         assertTrue(setup.contains("owned.remote().displayInventory()"))
