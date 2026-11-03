@@ -30,7 +30,37 @@ class CaptureSettingsStoreTest {
         Mockito.verify(editor).putString("capture", settings.request().toString())
         Mockito.verify(editor).commit()
         val defaults = CaptureSettingsStore(preferences().first).read()
-        assertTrue(defaults.audio); assertEquals("opus", defaults.audioCodec); assertEquals(192000, defaults.audioBitrate)
+        assertTrue(defaults.audio); assertEquals("raw", defaults.audioCodec); assertEquals(192000, defaults.audioBitrate)
+    }
+    @Test fun defaultsFollowTransportButExplicitAndSavedAudioChoicesNeverChange() {
+        val defaults = Settings()
+        assertEquals("raw", defaults.audioCodec)
+        defaults.validate()
+        defaults.mediaTransportMode = "srt"
+        assertEquals("opus", defaults.audioCodec)
+        defaults.validate()
+        defaults.mediaTransportMode = "custom"
+        assertEquals("raw", defaults.audioCodec)
+        for (codec in listOf("raw", "opus", "aac")) {
+            val settings = Settings().apply { audioCodec = codec }
+            val store = CaptureSettingsStore(preferences(settings.request().toString()).first)
+            val restored = store.read()
+            assertEquals(codec, restored.audioCodec)
+            restored.mediaTransportMode = "srt"
+            assertEquals(codec, restored.audioCodec)
+            if (codec == "raw") assertThrows(IllegalArgumentException::class.java) { restored.validate() }
+            else restored.validate()
+            store.write(settings)
+        }
+    }
+    @Test fun transportChoicesExcludeRawFromSrtAndPreferRawWhenSwitchingToCustom() {
+        assertEquals(listOf("raw", "opus", "aac"), Settings.audioCodecs("custom"))
+        assertEquals(listOf("opus", "aac"), Settings.audioCodecs("srt"))
+        for (previous in listOf("raw", "opus", "aac")) {
+            assertEquals("raw", Settings.audioCodecOnTransportChange("custom", previous))
+            assertEquals(if (previous == "raw") "opus" else previous,
+                Settings.audioCodecOnTransportChange("srt", previous))
+        }
     }
     @Test fun corruptStoredSettingsNeverSilentlyBecomeDefaults() {
         val store = CaptureSettingsStore(preferences("{malformed").first)

@@ -72,7 +72,7 @@ class AdbStreamRegressionTest {
         val configured = CountDownLatch(1)
         val executor = Executors.newSingleThreadExecutor()
         val reader = executor.submit {
-            ScrcpyAdapter.readStream(stream, 2, Settings(), 1, object : ScrcpyAdapter.Sink {
+            ScrcpyAdapter.readStream(stream, 2, Settings().apply { audioCodec = "opus" }, 1, object : ScrcpyAdapter.Sink {
                 override fun config(track: Int, generation: Int, config: JSONObject) { configured.countDown() }
                 override fun packet(packet: Wire.Message) { fail("No media was supplied during silence") }
             })

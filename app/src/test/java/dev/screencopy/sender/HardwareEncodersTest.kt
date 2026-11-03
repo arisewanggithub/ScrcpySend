@@ -87,7 +87,7 @@ class HardwareEncodersTest {
         val hardware = HardwareEncoders(listOf(encoder("video"), encoder("old.software", hardware = false, software = true),
             encoder("aac.hardware", "aac"),
             encoder("opus.software", "opus", false, true)))
-        val settings = Settings()
+        val settings = Settings().apply { audioCodec = "opus" }
         val before = settings.request().toString()
         val automatic = hardware.resolve(settings)
         assertEquals("video", automatic.videoEncoder)
@@ -112,7 +112,7 @@ class HardwareEncodersTest {
 
     @Test fun absentOrWrongMimeAudioFailsWithoutAacAudioOffOrEncoderSubstitution() {
         val inventory = HardwareEncoders(listOf(encoder("video"), encoder("aac.software", "aac", false, true)))
-        val settings = Settings()
+        val settings = Settings().apply { audioCodec = "opus" }
         val before = settings.request().toString()
         val failure = assertThrows(IOException::class.java) { inventory.resolve(settings) }
         assertTrue(failure.message!!.contains("No compatible opus encoder"))
@@ -166,7 +166,8 @@ class HardwareEncodersTest {
 
     @Test fun rawAudioBypassesEncodingWithoutInventingHardwareAndUnavailableInventoryFailsClosed() {
         val hardware = HardwareEncoders(listOf(encoder("video")))
-        val settings = Settings().apply { audioCodec = "raw" }
+        val settings = Settings()
+        assertEquals("raw", settings.audioCodec)
         assertEquals("", hardware.resolve(settings).audioEncoder)
         assertTrue(hardware.names("raw").isEmpty())
         assertThrows(IllegalStateException::class.java) { HardwareEncoders.fromReport("legacy backend report") }

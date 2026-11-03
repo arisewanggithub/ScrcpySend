@@ -5,14 +5,18 @@ import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -45,7 +49,14 @@ class UpdateUi internal constructor(
     private var action: Button? = null
     private var cancel: Button? = null
     private var status: TextView? = null
-    private var details: TextView? = null
+    private var currentVersion: TextView? = null
+    private var availableVersion: TextView? = null
+    private var availableVersionRow: LinearLayout? = null
+    private var dialogStatus: TextView? = null
+    private var progress: TextView? = null
+    private var details: LinearLayout? = null
+    private var detailsToggle: Button? = null
+    private var detailsExpanded = false
     private var dialog: AlertDialog? = null
     private var visible = false
     private var awaitingPermission = false
@@ -61,7 +72,7 @@ class UpdateUi internal constructor(
     fun mount(parent: LinearLayout, checkId: Int = View.NO_ID, updateId: Int = View.NO_ID,
         previousFocusId: Int = View.NO_ID) {
         this.previousFocusId = previousFocusId
-        check = button(parent, "Check for updates", ::checkForUpdates).apply {
+        check = button(parent, "Check for updates", click = ::checkForUpdates).apply {
             id = if (checkId == View.NO_ID) View.generateViewId() else checkId
         }
         status = text(parent, controller.status).apply {
@@ -113,6 +124,7 @@ class UpdateUi internal constructor(
         putBoolean("reopen", dialog != null && !automaticDialog || controller.installPending())
         putBoolean("launch_check_started", launchCheckStarted)
         putBoolean("automatic_prompt_pending", automaticPromptPending || automaticDialog)
+        putBoolean("details_expanded", detailsExpanded)
     }
     fun restoreState(state: Bundle?) {
         if (state == null) return
@@ -120,6 +132,7 @@ class UpdateUi internal constructor(
         reopen = state.getBoolean("reopen")
         launchCheckStarted = state.getBoolean("launch_check_started")
         automaticPromptPending = state.getBoolean("automatic_prompt_pending")
+        detailsExpanded = state.getBoolean("details_expanded")
         installing = controller.installPending()
     }
     fun resume() {
@@ -177,13 +190,34 @@ class UpdateUi internal constructor(
         localNotice = null
         val body = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            val pad = (20 * activity.resources.displayMetrics.density).toInt()
+            val pad = dp(20)
             setPadding(pad, pad, pad, pad)
         }
-        details = text(body, "")
-        val actionButton = button(body, "Download and install update", ::act).also { action = it }
-        val cancelButton = button(body, "Later", ::later).also { cancel = it }
-        val scroll = ScrollView(activity).apply { addView(body) }
+        currentVersion = versionRow(body, "Current version").second
+        val latest = versionRow(body, "Available version")
+        availableVersionRow = latest.first
+        availableVersion = latest.second
+        dialogStatus = text(body, "", 18f, true).apply {
+            setPadding(0, dp(16), 0, dp(8))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        progress = text(body, "", 14f).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        text(body, "Updates are verified before Android's installer opens.", 13f)
+        detailsToggle = button(body, "Show details") { setDetailsExpanded(!detailsExpanded) }
+        details = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }.also(body::addView)
+        detail("Source", "Stable GitHub release. Wire protocol 3.")
+        detail("Verification", "Before installation, checks verify the APK checksum, application ID, version and installed signing key.")
+        detail("Installation", "Android may ask for install confirmation. No browser or notification is required.")
+        setDetailsExpanded(detailsExpanded)
+        val actionButton = button(body, "Download and install update", primary = true, click = ::act).also { action = it }
+        val cancelButton = button(body, "Later", click = ::later).also { cancel = it }
+        val scroll = ScrollView(activity).apply {
+            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+            isFocusable = false
+            addView(body)
+        }
         val current = AlertDialog.Builder(activity).setTitle("App updates").setView(scroll).create()
         dialog = current
         current.setOnCancelListener {
@@ -192,7 +226,12 @@ class UpdateUi internal constructor(
         current.setOnDismissListener { if (dialog === current) dialog = null }
         current.show()
         render()
-        (if (!controller.busy && controller.available()) actionButton else cancelButton).requestFocus()
+        val initialFocus = if (!controller.busy && controller.available()) actionButton else cancelButton
+        initialFocus.requestFocus()
+        initialFocus.post {
+            if (dialog === current && current.isShowing && !initialFocus.isInTouchMode)
+                (if (actionButton.isEnabled) actionButton else cancelButton).requestFocus()
+        }
     }
     private fun later() {
         controller.finishUpdateRequested = false
@@ -203,6 +242,7 @@ class UpdateUi internal constructor(
         dialog?.dismiss()
         dialog = null
         automaticDialog = false
+        detailsExpanded = false
         val updateButton = update
         if (updateButton?.visibility == View.VISIBLE) updateButton.requestFocus() else focusCheck()
     }
@@ -227,21 +267,23 @@ class UpdateUi internal constructor(
             if (controller.downloadReady()) act()
         }
         if (dialog == null) return
-        var versions = "Current: ${controller.installedName} (${controller.installedCode})\n"
-        controller.release?.let { versions += "Latest: ${it.versionName} (${it.versionCode})\n" }
-        val progress = if (controller.busy && controller.downloaded > 0)
-            "\nDownloaded ${controller.downloaded / 1024} KiB" +
+        currentVersion?.text = "${controller.installedName} (${controller.installedCode})"
+        availableVersionRow?.visibility = if (controller.release == null) View.GONE else View.VISIBLE
+        availableVersion?.text = controller.release?.let { "${it.versionName} (${it.versionCode})" }.orEmpty()
+        dialogStatus?.text = localNotice ?: message
+        val downloadProgress = if (controller.busy && controller.downloaded > 0)
+            "Downloaded ${controller.downloaded / 1024} KiB" +
                 (if (controller.total > 0) " of ${controller.total / 1024} KiB" else "")
             else ""
-        details?.text = versions + (localNotice ?: message) + progress +
-            "\nStable GitHub release · protocol 3 · APK checksum and installed signing key verified before install." +
-            "\nYour projector's Android installer may require its own confirmation. No browser or notification is needed."
+        progress?.text = downloadProgress
+        progress?.visibility = if (downloadProgress.isEmpty()) View.GONE else View.VISIBLE
         action?.text = if (controller.downloadReady()) {
             if (allowed()) {
                 if (controller.installNeedsRetry()) "Retry installation" else "Install update"
             } else "Allow installs"
         } else "Download and install update"
         action?.isEnabled = controller.available() && !controller.busy && !installing
+        wireDialogFocus()
         if (controller.busy && cancel?.hasFocus() == false) cancel?.requestFocus()
     }
     private fun act() {
@@ -316,28 +358,91 @@ class UpdateUi internal constructor(
         localNotice = "No Android package installer is available. Ask your device administrator to enable an installer; the verified download is retained."
         render()
     }
-    private fun text(parent: LinearLayout, value: String): TextView = TextView(activity).apply {
+    private fun dp(value: Int) = (value * activity.resources.displayMetrics.density + 0.5f).toInt()
+    private fun versionRow(parent: LinearLayout, label: String): Pair<LinearLayout, TextView> {
+        val row = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        parent.addView(row)
+        text(row, label, 13f).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(0, 0, dp(8), 0)
+        }
+        val value = text(row, "", 16f, true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.END
+        }
+        return row to value
+    }
+    private fun detail(title: String, description: String) {
+        val parent = checkNotNull(details)
+        text(parent, title, 14f, true).apply {
+            setPadding(0, dp(12), 0, dp(4))
+            isAccessibilityHeading = true
+        }
+        text(parent, description, 13f)
+    }
+    private fun setDetailsExpanded(expanded: Boolean) {
+        detailsExpanded = expanded
+        details?.visibility = if (expanded) View.VISIBLE else View.GONE
+        detailsToggle?.text = if (expanded) "Hide details" else "Show details"
+        detailsToggle?.stateDescription = if (expanded) "Expanded" else "Collapsed"
+    }
+    private fun wireDialogFocus() {
+        val primary = action ?: return
+        val later = cancel ?: return
+        val disclosure = detailsToggle ?: return
+        val availableAction = if (primary.isEnabled) primary else disclosure
+        primary.nextFocusDownId = later.id
+        primary.nextFocusUpId = disclosure.id
+        primary.nextFocusLeftId = later.id
+        primary.nextFocusRightId = later.id
+        later.nextFocusUpId = availableAction.id
+        later.nextFocusDownId = disclosure.id
+        later.nextFocusLeftId = availableAction.id
+        later.nextFocusRightId = availableAction.id
+        disclosure.nextFocusUpId = later.id
+        disclosure.nextFocusDownId = if (primary.isEnabled) primary.id else later.id
+        disclosure.nextFocusLeftId = later.id
+        disclosure.nextFocusRightId = if (primary.isEnabled) primary.id else later.id
+    }
+    private fun text(parent: LinearLayout, value: String, size: Float = 14f, emphasized: Boolean = false): TextView = TextView(activity).apply {
         text = value
-        setTextColor(Color.DKGRAY)
-        textSize = 16f
+        setTextColor(if (emphasized) Color.BLACK else Color.DKGRAY)
+        textSize = size
+        if (emphasized) setTypeface(typeface, Typeface.BOLD)
+        setPadding(0, dp(4), 0, dp(4))
         parent.addView(this)
     }
-    private fun button(parent: LinearLayout, label: String, click: () -> Unit): Button = Button(activity).apply {
+    private fun button(parent: LinearLayout, label: String, primary: Boolean = false, click: () -> Unit): Button = Button(activity).apply {
+        id = View.generateViewId()
         text = label
-        setTextColor(Color.BLACK)
+        isAllCaps = false
+        textSize = 16f
+        minimumHeight = dp(52)
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        setTextColor(ColorStateList(
+            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf(android.R.attr.state_focused),
+                intArrayOf(android.R.attr.state_pressed), intArrayOf()),
+            intArrayOf(Color.DKGRAY, Color.BLACK, Color.BLACK, if (primary) Color.WHITE else Color.BLACK)
+        ))
         isFocusable = true
-        isFocusableInTouchMode = true
+        // Touch taps click immediately; D-pad input still uses normal focus.
+        isFocusableInTouchMode = false
         background = StateListDrawable().apply {
+            addState(intArrayOf(-android.R.attr.state_enabled), shape(Color.LTGRAY, Color.DKGRAY, 1))
             addState(intArrayOf(android.R.attr.state_focused), shape(Color.rgb(255, 221, 112), Color.BLACK, 4))
             addState(intArrayOf(android.R.attr.state_pressed), shape(Color.rgb(255, 221, 112), Color.BLACK, 4))
-            addState(intArrayOf(), shape(Color.LTGRAY, Color.DKGRAY, 1))
+            addState(intArrayOf(), shape(if (primary) Color.rgb(0, 105, 92) else Color.LTGRAY, Color.DKGRAY, 1))
         }
-        parent.addView(this, LinearLayout.LayoutParams(-1, (52 * activity.resources.displayMetrics.density).toInt()))
+        parent.addView(this, LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         setOnClickListener { click() }
     }
     private fun shape(fill: Int, stroke: Int, width: Int): GradientDrawable = GradientDrawable().apply {
         setColor(fill)
         setStroke(width, stroke)
-        cornerRadius = 6f
+        cornerRadius = dp(6).toFloat()
     }
 }

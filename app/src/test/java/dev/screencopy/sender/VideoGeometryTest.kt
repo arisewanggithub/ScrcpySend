@@ -138,8 +138,9 @@ class VideoGeometryTest {
         Settings().apply { cropWidth = 100; cropHeight = 100; cropX = 2; cropY = 3 }.validate()
         val editor = readUtf8Strict(Path.of(System.getProperty("senderSources"), "CaptureSettingsEditor.kt"))
         assertTrue(editor.contains("Crop width (pixels)")); assertTrue(editor.contains("Crop height (pixels)"))
-        assertTrue(editor.contains("Set width, height, X and Y to 0"))
-        assertTrue(editor.contains("Offsets are measured from the top-left in the display's default orientation."))
+        assertTrue(editor.contains("For full screen, set all four crop values to 0."))
+        assertTrue(editor.contains("Otherwise width and height must be positive."))
+        assertTrue(editor.contains("X/Y are measured from the top-left in the display's default orientation."))
         assertFalse(editor.contains("Crop width (0 = disabled)"))
     }
     @Test fun actualBoundaryRunsPrivilegedJointSdkPreflightBeforeNegotiationAndAgainBeforeLaunch() {

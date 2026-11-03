@@ -1,0 +1,7 @@
+<resources>
+    <declare-styleable name="SenderUiTheme">
+        <attr name="android:textColorPrimary" />
+        <attr name="android:textColorSecondary" />
+        <attr name="android:colorBackgroundFloating" />
+    </declare-styleable>
+</resources>

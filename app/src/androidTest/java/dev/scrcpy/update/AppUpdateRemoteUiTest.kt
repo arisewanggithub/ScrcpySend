@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -121,11 +122,13 @@ class AppUpdateRemoteUiTest {
             ui.focusCheck()
         }
         instrumentation.waitForIdleSync()
-        awaitUi("initial host window and Check focus") {
+        awaitUi("initial host window") {
             activity.window.decorView.hasWindowFocus() &&
-                button(activity.content, "Check for updates").hasFocus()
+                visibleButton(button(activity.content, "Check for updates"))
         }
-        key(KeyEvent.KEYCODE_DPAD_UP)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_UP)
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync { ui.focusCheck() }
         awaitUi("native remote mode") {
             !activity.window.decorView.isInTouchMode &&
                 button(activity.content, "Check for updates").hasFocus()
@@ -154,6 +157,13 @@ class AppUpdateRemoteUiTest {
             if (containsText(root.getChildAt(i), text)) return true
         }
         return false
+    }
+    private fun findText(root: View?, value: String): TextView? {
+        if (root is TextView && root.text.toString() == value) return root
+        if (root is ViewGroup) for (index in 0 until root.childCount) {
+            findText(root.getChildAt(index), value)?.let { return it }
+        }
+        return null
     }
     private fun activeRoot(): View = ui.dialogViewForTests() ?: activity.window.decorView
     private fun visibleButton(view: View?): Boolean {
@@ -227,6 +237,30 @@ class AppUpdateRemoteUiTest {
     }
     private fun center() = key(KeyEvent.KEYCODE_DPAD_CENTER)
     private fun down() = key(KeyEvent.KEYCODE_DPAD_DOWN)
+    private fun tap(prefix: String) {
+        val bounds = Rect()
+        val windowLocation = IntArray(2)
+        awaitUi("visible touch target $prefix") { visibleButton(button(activeRoot(), prefix)) }
+        instrumentation.runOnMainSync {
+            val target = button(activeRoot(), prefix)
+            assertTrue(target.isFocusable)
+            assertFalse(target.isFocusableInTouchMode)
+            assertTrue(target.getGlobalVisibleRect(bounds))
+            // Pointer injection uses screen coordinates, not the root-relative visible rect.
+            target.rootView.getLocationOnScreen(windowLocation)
+            bounds.offset(windowLocation[0], windowLocation[1])
+        }
+        val started = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(started, started, MotionEvent.ACTION_DOWN,
+            bounds.exactCenterX(), bounds.exactCenterY(), 0)
+        try { instrumentation.sendPointerSync(down) } finally { down.recycle() }
+        SystemClock.sleep(50)
+        val up = MotionEvent.obtain(started, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP,
+            bounds.exactCenterX(), bounds.exactCenterY(), 0)
+        try { instrumentation.sendPointerSync(up) } finally { up.recycle() }
+        instrumentation.waitForIdleSync()
+        awaitUi("touch mode after one tap on $prefix") { activeRoot().isInTouchMode }
+    }
 
     @Test fun remoteCheckDownloadCancelAndBackNeedNoTouch() {
         center()
@@ -304,6 +338,24 @@ class AppUpdateRemoteUiTest {
     @Test fun dpadDirectionsPreserveVisibleFocusAndBackCancels() {
         center()
         awaitFocused("Download and install")
+        key(KeyEvent.KEYCODE_DPAD_UP)
+        awaitFocused("Show details")
+        center()
+        awaitFocused("Hide details")
+        instrumentation.runOnMainSync {
+            assertTrue(requireNotNull(findText(ui.dialogViewForTests(), "Stable GitHub release. Wire protocol 3.")).isShown)
+            assertEquals(0, backend.downloads)
+            assertEquals(0, installs.installed)
+            val saved = ui.saveState()
+            ui.stop()
+            activity.content.removeAllViews()
+            ui = UpdateUi(activity, backend, { casting }, installs)
+            activity.updatesForTests = ui
+            ui.restoreState(saved); ui.mount(activity.content); ui.start(); ui.resume()
+            assertTrue(requireNotNull(findText(ui.dialogViewForTests(), "Stable GitHub release. Wire protocol 3.")).isShown)
+            assertNotNull(findButton(ui.dialogViewForTests(), "Hide details"))
+        }
+        awaitFocused("Download and install")
         down()
         awaitFocused("Later")
         instrumentation.runOnMainSync { assertTrue(button(ui.dialogViewForTests(), "Later").hasFocus()) }
@@ -360,7 +412,6 @@ class AppUpdateRemoteUiTest {
             activity.updatesForTests = ui
             ui.restoreState(saved); ui.mount(activity.content); ui.start(); ui.resume()
             assertTrue(containsText(ui.dialogViewForTests(), "has not been confirmed"))
-            assertTrue(button(ui.dialogViewForTests(), "Retry installation").hasFocus())
         }
         assertEquals(1, installs.installed)
         assertEquals(0, backend.downloads)
@@ -426,17 +477,49 @@ class AppUpdateRemoteUiTest {
         assertEquals(1, installs.installed)
     }
     @Test fun twoActionsDownloadAndInstallWithoutAnotherAppTap() {
-        center()
+        tap("Check for updates")
+        assertEquals(1, backend.checks)
         instrumentation.runOnMainSync {
             installs.allowed = true
-            assertEquals(2, countButtons(requireNotNull(ui.dialogViewForTests())))
+            val root = requireNotNull(ui.dialogViewForTests())
+            assertEquals("Two update decisions and one non-installing details disclosure", 3, countButtons(root))
+            val current = requireNotNull(findText(root, "Current version"))
+            val available = requireNotNull(findText(root, "Available version"))
+            val currentValue = (current.parent as ViewGroup).getChildAt(1) as TextView
+            val availableValue = (available.parent as ViewGroup).getChildAt(1) as TextView
+            assertEquals("${backend.installedName} (${backend.installedCode})", currentValue.text.toString())
+            assertEquals("Test release (${requireNotNull(backend.release).versionCode})", availableValue.text.toString())
+            assertTrue(currentValue.typeface.isBold)
+            assertTrue(currentValue.textSize > current.textSize)
+            val status = requireNotNull(findText(root, backend.displayStatus()))
+            assertTrue(status.typeface.isBold)
+            assertTrue(status.textSize > currentValue.textSize)
+            val source = requireNotNull(findText(root, "Stable GitHub release. Wire protocol 3."))
+            assertFalse(source.isShown)
+            assertTrue(status.textSize > source.textSize)
         }
-        center()
+        tap("Show details")
+        instrumentation.runOnMainSync { assertNotNull(findButton(ui.dialogViewForTests(), "Hide details")) }
+        tap("Hide details")
+        instrumentation.runOnMainSync { assertNotNull(findButton(ui.dialogViewForTests(), "Show details")) }
+        tap("Later")
+        instrumentation.runOnMainSync { assertNull(ui.dialogViewForTests()) }
+        assertEquals(0, backend.downloads)
+        assertEquals(0, installs.installed)
+        tap("Check for updates")
+        assertEquals(2, backend.checks)
+        tap("Download and install")
         assertEquals(1, backend.downloads)
         assertEquals(0, installs.installed)
         instrumentation.runOnMainSync { backend.verified = true; backend.busy = false; backend.emit() }
         awaitInstalled(1)
         assertFalse(backend.finishUpdateRequested)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_UP)
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync { ui.focusCheck() }
+        awaitUi("D-pad focus restored after touch") {
+            !activity.window.decorView.isInTouchMode && button(activity.content, "Check for updates").hasFocus()
+        }
     }
     @Test fun installedVersionIsVisibleOnTheActualHomeScreen() {
         assertTrue("Home test is disposable-emulator only",

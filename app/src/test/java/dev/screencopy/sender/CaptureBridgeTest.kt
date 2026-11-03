@@ -92,7 +92,7 @@ class CaptureBridgeTest {
         CaptureBackend(context(), bridge, failures::add).use { backend ->
             backend.deploy()
             assertEquals("verified privileged capability listing", backend.capabilities())
-            backend.start(Settings(), 7, object : ScrcpyAdapter.Sink {
+            backend.start(Settings().apply { audioCodec = "opus" }, 7, object : ScrcpyAdapter.Sink {
                 override fun config(track: Int, generation: Int, config: JSONObject) {
                     assertEquals(1, generation)
                     if (track == 1) { assertEquals(640, config.getInt("width")); assertEquals(480, config.getInt("height")) }
