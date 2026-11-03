@@ -89,6 +89,11 @@ open class UpdateController protected constructor(
         installMessage()?.let { status = it }
     }
     fun available(): Boolean = release?.let { it.versionCode > installedCode } ?: false
+    open fun browserDownloadUrl(): String {
+        check(available()) { "No newer release is available." }
+        val url = checkNotNull(apkUrl) { "Release download link is unavailable. Check for updates again." }
+        return ReleasePolicy.browserApkUrl(url, repository, asset)
+    }
     fun downloadReady(): Boolean = (verified || retained) && apk.isFile && available()
     fun installTargetVersion(): Long = prefs.getLong("install_target_version", 0)
     fun installPending(): Boolean = prefs.getString("install_outcome", "") == "pending"
@@ -119,12 +124,16 @@ open class UpdateController protected constructor(
         showInstallOutcome = true
         status = installMessage() ?: "Waiting for Android installer confirmation."
     }
-    protected open fun refreshInstalledVersion(): Boolean = try {
+    open fun refreshInstalledVersion(): Boolean = try {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         installedCode = code(info)
         installedName = info.versionName ?: "(unknown)"
         true
-    } catch (_: Exception) { false }
+    } catch (error: Exception) {
+        android.util.Log.e("ScrcpyAppUpdate", "Installed version refresh failed", error)
+        status = "Installed version unavailable. Reopen the app before downloading an update."
+        false
+    }
 
     @Suppress("DEPRECATION")
     protected open fun installedSignerMatches(expected: String): Boolean = try {
@@ -160,7 +169,11 @@ open class UpdateController protected constructor(
     fun detachForRecreation() { observer = null }
     private fun notifyUi() { observer?.changed() }
     open fun foregroundCheck() {
-        if (!busy && !installPending() && !installNeedsRetry()) check()
+        if (!busy) {
+            // Browser handoff supersedes legacy in-app installer attempts.
+            prefs.edit().remove("install_outcome").remove("install_target_version").remove("install_signer").apply()
+            check()
+        }
     }
     open fun cancel() {
         finishUpdateRequested = false

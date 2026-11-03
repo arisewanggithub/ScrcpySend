@@ -22,13 +22,4 @@ class UpdateTestActivity : Activity() {
         updatesForTests?.let { state.putBundle("app_update_ui", it.saveState()) }
         super.onSaveInstanceState(state)
     }
-    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (updatesForTests?.onActivityResult(requestCode, resultCode, data) == true) return
-        super.onActivityResult(requestCode, resultCode, data)
-    }
-    @Suppress("DEPRECATION")
-    fun dispatchInstallResultForTests(requestCode: Int, resultCode: Int, data: Intent?) {
-        onActivityResult(requestCode, resultCode, data)
-    }
 }
