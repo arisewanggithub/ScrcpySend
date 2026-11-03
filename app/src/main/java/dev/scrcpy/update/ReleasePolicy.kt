@@ -31,6 +31,16 @@ object ReleasePolicy {
         val versionCode: Int
     )
 
+    fun browserApkUrl(value: String, repository: String, asset: String): String {
+        val uri = URI(trustedUrl(value))
+        require(uri.host == "github.com" &&
+            uri.path.startsWith("/arisewanggithub/$repository/releases/download/") &&
+            uri.path.endsWith("/$asset") && uri.rawQuery == null) {
+            "Release download link is not an official APK asset."
+        }
+        return value
+    }
+
     private fun string(json: JSONObject, key: String, max: Int): String {
         val value = json.get(key)
         require(value is String && value.isNotEmpty() && value.length <= max &&

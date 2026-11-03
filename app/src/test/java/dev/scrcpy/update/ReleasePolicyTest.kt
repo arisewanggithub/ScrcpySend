@@ -52,6 +52,18 @@ class ReleasePolicyTest {
             "file:///a", "https://github.com/a#fragment", "https://raw.githubusercontent.com/a"))
             assertThrows(IllegalArgumentException::class.java) { ReleasePolicy.trustedUrl(url) }
     }
+    @Test fun browserDownloadsRequireTheOfficialExactApkAsset() {
+        val url = "https://github.com/arisewanggithub/ScrcpySend/releases/download/v1.0.4/ScrcpySend.apk"
+        assertEquals(url, ReleasePolicy.browserApkUrl(url, "ScrcpySend", assetName))
+        for (invalid in listOf(
+            url.replace("https:", "http:"), url.replace("arisewanggithub", "other"),
+            url.replace("ScrcpySend/releases", "Other/releases"), "$url?redirect=other",
+            "$url#fragment", url.replace("ScrcpySend.apk", "other.apk"),
+            url.replace("github.com", "release-assets.githubusercontent.com")
+        )) assertThrows(IllegalArgumentException::class.java) {
+            ReleasePolicy.browserApkUrl(invalid, "ScrcpySend", assetName)
+        }
+    }
     @Test fun stableReleaseRequiresExactlyNamedUniqueAssets() {
         val url = "https://github.com/example/project/releases/download/v2/ScrcpySend.apk"
         val asset = JSONObject().put("name", assetName).put("browser_download_url", url)

@@ -2,7 +2,34 @@
 
 ScrcpySend and ScrcpyRecv use the stable Android application IDs `dev.screencopy.sender` and `org.screencopy.receiver`, respectively. In-place upgrades preserve app data only with the same application ID and signing certificate. They are independent projects, not official scrcpy applications; upstream attribution is provided in the third-party notices.
 
-## Touch and remote flow
+## Sender browser flow
+
+Each fresh sender launch checks the stable release once; rotation/resume do not
+start another check. A newer version prompts only while the app is foreground
+and casting is idle. Manual checks remain available in Settings.
+
+**Download APK in browser** opens the exact APK asset from the official
+`arisewanggithub/ScrcpySend` GitHub release using `ACTION_VIEW` and
+`CATEGORY_BROWSABLE`, following PartialCast's external-browser handoff pattern.
+The browser downloads the file; the user opens it and confirms installation
+through Android. The sender does not download or launch an installer, request
+Install unknown apps permission, or expose the former update FileProvider.
+Metadata/version checks and trusted release URL validation remain in the app,
+but browser downloads are not checksum-verified by it. Android checks signing
+continuity during installation; debug-key installations cannot update in place
+to production-signed releases.
+
+Later/Back dismisses the prompt. Missing/blocked browsers show an actionable
+error and retain the dialog for explicit retry. Opening a browser requires a
+foreground, idle sender; it never stops a cast. Restoring the dialog or returning
+from a browser never downloads automatically. Touch activates on the first tap,
+while D-pad focus remains supported. Version/status typography and expandable
+details are retained.
+
+## Legacy receiver in-app installer flow
+
+The following installer behavior describes the receiver/shared legacy installer
+implementation, not the sender's current browser dialog.
 
 Both home screens show the actual installed app version, without update status controls. Each fresh launch checks silently once; rotation and ordinary resume do not start another check. Only a successful check for a newer version opens the popup, after casting is idle. **Later** or Back dismisses it for that launch. Failed checks are logged without a popup; GitHub cooldowns still apply. The receiver has no Settings/update entry. Sender capture Settings still provides a manual check. D-pad/Center/OK navigation has visible focus.
 
@@ -60,7 +87,16 @@ Only stable, non-draft releases qualify. Each release must contain exactly one `
 
 For the receiver use `org.screencopy.receiver` and `ScrcpyRecv.apk`. `protocolVersion:3` identifies wire compatibility, not an application release number; `schema:1` identifies the update manifest schema. Version codes must be positive integers no greater than 2147483647; names are not used for ordering. The placeholders above are documentation, not a valid manifest. Optional extra fields do not authorize protocol or signer changes.
 
-Assets initially belong to the pinned repository's GitHub release download path. HTTPS redirects are bounded and restricted to the literal hosts `github.com`, `api.github.com`, `objects.githubusercontent.com`, and `release-assets.githubusercontent.com`. APKs are bounded to 250 MiB. The app verifies SHA-256, archive application ID, archive version against the manifest, strictly newer version code, manifest signer fingerprint, and equality with the currently installed app's single current signer. It verifies again before granting the installer read access to the private APK through its narrowly scoped, non-exported FileProvider.
+Assets initially belong to the pinned repository's GitHub release download path.
+Metadata requests follow bounded HTTPS redirects restricted to the literal hosts
+`github.com`, `api.github.com`, `objects.githubusercontent.com`, and
+`release-assets.githubusercontent.com`. The sender hands the exact official APK
+asset URL to the browser; browser download redirects and file storage are managed
+by the browser, not the sender. Published APK metadata/checksums/signatures are
+verified by the release workflow. The receiver's legacy in-app downloader
+additionally bounds APKs to 250 MiB and verifies archive identity, version,
+checksum and signer before granting installer access through its FileProvider;
+those checks are not performed by the sender on browser-managed files.
 
 Different signing keys, missing signers, multi-signer packages, or certificate rotations are refused rather than uninstalling or risking data loss. A CI release cannot update a debug-key installation unless its signing certificate is the same. Publication therefore still requires manually configured permanent signing with the intended existing certificate; neither these apps nor their tests create or upload a signing key.
 

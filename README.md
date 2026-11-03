@@ -254,10 +254,13 @@ library in the harness.
 
 ## Updates and signed releases
 
-The D-pad-friendly updater checks the repository's latest stable release.
-Checking/downloading does not stop an active cast. Permission and installation
-require explicit user actions; installer cancellation/failure remains
-recoverable without automatically reinstalling. See [UPDATES.md](UPDATES.md).
+The touch/D-pad-friendly updater checks the repository's latest stable release.
+**Download APK in browser** opens its official GitHub APK asset, like
+PartialCast's external-browser handoff. The browser manages downloading; users
+open the downloaded file and confirm installation through Android. The sender
+does not request install permission or launch an in-app installer, and does not
+claim browser downloads were checksum-verified by the app. An active cast is
+never stopped to open an update. See [UPDATES.md](UPDATES.md).
 
 CI supplies `releaseVersionCode=10000+github.run_number` and a
 `releaseVersionName` from the stable tag (without `v`) or `dev-<short-sha>`.

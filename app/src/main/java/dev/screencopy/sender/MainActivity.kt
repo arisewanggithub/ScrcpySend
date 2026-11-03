@@ -428,10 +428,6 @@ class MainActivity : Activity() {
         render(); reconcileShizuku()
     }
     override fun onResume() { super.onResume(); updates.resume(); refreshVersion(); refreshAppliedSettings(); reconcileShizuku() }
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (updates.onActivityResult(requestCode, resultCode, data)) { refreshVersion(); return }
-        super.onActivityResult(requestCode, resultCode, data)
-    }
     override fun onStop() {
         updates.stop()
         visible = false; autoConnect.leave(isChangingConfigurations)
