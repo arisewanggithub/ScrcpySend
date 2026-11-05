@@ -7,7 +7,7 @@ internal data class AacConfiguration(val sampleRate: Int, val channels: Int, val
     companion object {
         fun parse(bytes: ByteArray): AacConfiguration {
             val bits = CodecBits(bytes)
-            if (bits.read(5) != 2) throw IOException("UNSUPPORTED_CONFIG: SRT AAC requires AAC-LC")
+            if (bits.read(5) != 2) throw IOException("UNSUPPORTED_CONFIG: AAC requires AAC-LC")
             val index = bits.read(4)
             val rates = intArrayOf(96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
             val rate = if (index == 15) bits.read(24) else rates.getOrNull(index)
@@ -23,7 +23,7 @@ internal data class AacConfiguration(val sampleRate: Int, val channels: Int, val
         }
         fun accessUnit(bytes: ByteArray) {
             if (bytes.isEmpty() || bytes.size >= 2 && bytes[0] == 0xff.toByte() && bytes[1].toInt() and 0xf6 == 0xf0)
-                throw IOException("AUDIO_FAILED: SRT AAC requires raw access units, not ADTS")
+                throw IOException("AUDIO_FAILED: AAC requires raw access units, not ADTS")
         }
     }
 }

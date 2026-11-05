@@ -1,10 +1,6 @@
 # Test runtime has its own namespace, not app mapping names or shared facades.
 -repackageclasses dev.scrcpy.releasecheck.internal
 -keep class dev.scrcpy.releasecheck.ReleaseCheckRunner { public <init>(); }
--keep class dev.scrcpy.releasecheck.NativeSrtCheck {
-    public <init>();
-    @org.junit.Test public void *(...);
-}
 -keep class dev.scrcpy.releasecheck.SourceCryptoCheck {
     public <init>();
     @org.junit.Test public void *(...);

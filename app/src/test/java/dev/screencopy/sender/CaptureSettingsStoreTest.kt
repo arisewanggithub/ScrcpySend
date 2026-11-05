@@ -32,34 +32,36 @@ class CaptureSettingsStoreTest {
         val defaults = CaptureSettingsStore(preferences().first).read()
         assertTrue(defaults.audio); assertEquals("raw", defaults.audioCodec); assertEquals(192000, defaults.audioBitrate)
     }
-    @Test fun defaultsFollowTransportButExplicitAndSavedAudioChoicesNeverChange() {
+    @Test fun defaultsAndSavedAudioChoicesNeverChange() {
         val defaults = Settings()
         assertEquals("raw", defaults.audioCodec)
         defaults.validate()
-        defaults.mediaTransportMode = "srt"
-        assertEquals("opus", defaults.audioCodec)
-        defaults.validate()
-        defaults.mediaTransportMode = "custom"
-        assertEquals("raw", defaults.audioCodec)
         for (codec in listOf("raw", "opus", "aac")) {
             val settings = Settings().apply { audioCodec = codec }
             val store = CaptureSettingsStore(preferences(settings.request().toString()).first)
             val restored = store.read()
             assertEquals(codec, restored.audioCodec)
-            restored.mediaTransportMode = "srt"
-            assertEquals(codec, restored.audioCodec)
-            if (codec == "raw") assertThrows(IllegalArgumentException::class.java) { restored.validate() }
-            else restored.validate()
+            restored.validate()
             store.write(settings)
         }
     }
-    @Test fun transportChoicesExcludeRawFromSrtAndPreferRawWhenSwitchingToCustom() {
-        assertEquals(listOf("raw", "opus", "aac"), Settings.audioCodecs("custom"))
-        assertEquals(listOf("opus", "aac"), Settings.audioCodecs("srt"))
-        for (previous in listOf("raw", "opus", "aac")) {
-            assertEquals("raw", Settings.audioCodecOnTransportChange("custom", previous))
-            assertEquals(if (previous == "raw") "opus" else previous,
-                Settings.audioCodecOnTransportChange("srt", previous))
+    @Test fun unavailableSavedTransportsRequireExplicitCorrectionWithoutChangingAudio() {
+        assertEquals(listOf("raw", "opus", "aac"), Settings.audioCodecs())
+        for (mode in listOf("removed-transport", "rtsp-tcp", "")) {
+            val saved = Settings().apply { mediaTransportMode = mode; audioCodec = "aac"; maxFps = 30 }
+            val (prefs, editor) = preferences(saved.request().toString())
+            val store = CaptureSettingsStore(prefs)
+            assertThrows(IllegalArgumentException::class.java) { store.read() }
+            val draft = store.readForEditing()
+            assertEquals(mode, draft.mediaTransportMode)
+            assertEquals("aac", draft.audioCodec)
+            assertEquals(30, draft.maxFps)
+            Mockito.verifyNoInteractions(editor)
+            draft.mediaTransportMode = "custom"
+            store.write(draft)
+            assertFalse(draft.request().has("mediaTransportMode"))
+            assertFalse(draft.request().has("mediaTransport"))
+            assertEquals("aac", draft.audioCodec)
         }
     }
     @Test fun corruptStoredSettingsNeverSilentlyBecomeDefaults() {

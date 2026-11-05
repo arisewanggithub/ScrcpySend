@@ -5,7 +5,6 @@ import org.junit.Test
 
 class HomeCaptureSettingsTest {
     private fun selected() = Settings().apply {
-        mediaTransportMode = "srt"
         videoCodec = "av1"; videoEncoder = "c2.test.av1"
         videoBitrate = 2_500_000; maxSize = 1200; maxFps = 30; displayId = 2
         cropWidth = 640; cropHeight = 480; cropX = 12; cropY = 14
@@ -24,7 +23,7 @@ class HomeCaptureSettingsTest {
 
     @Test fun everyNondefaultParameterHasReadableUnitsAndRequestedLabels() {
         val summary = HomeCaptureSettings.summary(selected())
-        for (line in listOf("Media transport: SRT (fMP4)", "Video codec: av1",
+        for (line in listOf("Video codec: av1",
             "Video encoder: c2.test.av1", "Video bitrate: 2.5 Mbps", "Maximum size: 1200 pixels",
             "Maximum FPS: 30 FPS", "Screen to share: Display 2", "Crop: 640 × 480 pixels at (12, 14)",
             "Capture orientation: 270° (locked)", "Receiver orientation: Portrait",

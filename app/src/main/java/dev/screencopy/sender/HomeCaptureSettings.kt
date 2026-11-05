@@ -22,7 +22,7 @@ internal object HomeCaptureSettings {
         }
         if (ignoreSizeAndCrop) lines += "Full screen: size/crop ignored"
         changed("Media transport", settings.mediaTransportMode, defaults.mediaTransportMode,
-            when (settings.mediaTransportMode) { "custom" -> "Custom TCP"; "srt" -> "SRT (fMP4)"; else -> settings.mediaTransportMode })
+            when (settings.mediaTransportMode) { "custom" -> "Custom TCP"; else -> "Unavailable" })
         changed("Video codec", settings.videoCodec, defaults.videoCodec)
         changed("Video encoder", settings.videoEncoder, defaults.videoEncoder)
         changed("Video bitrate", settings.videoBitrate, defaults.videoBitrate, "${Bitrates.videoMbps(settings.videoBitrate)} Mbps")

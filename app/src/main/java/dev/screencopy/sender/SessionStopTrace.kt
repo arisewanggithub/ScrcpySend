@@ -18,20 +18,18 @@ internal class SessionStopTrace(private val log: (String) -> Unit, private val c
                      timestampMs: Long = System.currentTimeMillis(), lastReceiveAgeMs: Long? = null, writeElapsedMs: Long? = null) {
         val original = if (error is java.io.IOException) error
             else java.io.IOException("${SessionOutcome.errorCode(error)}: session failed", error)
-        val safe = SrtFailureDiagnostics.sanitize(original, settings.mediaTransportMode == "srt")
-        val evidence = SrtFailureDiagnostics.evidence(original)
-        val lines = SrtFailureDiagnostics.lines(original, safe)
-        val causes = lines.filter { it.startsWith("srt_failure_cause ") }
-        val stack = lines.filter { it.startsWith("srt_failure_stack ") }.takeLast(12)
+        val safe = SenderFailureDiagnostics.sanitize(original)
+        val chain = SenderFailureDiagnostics.chain(original)
+        val root = chain.last()
+        val causes = SenderFailureDiagnostics.causes(chain)
+        val stack = SenderFailureDiagnostics.stack(chain)
         fun codec(value: String) = value.takeIf { it in setOf("h264", "h265", "av1", "opus", "aac", "raw") } ?: "UNKNOWN"
         // Wire JSON numbers are int32; local diagnostic identifiers/times are decimal int64 strings.
         log("sender_session_failure ${Wire.obj(
             "session" to session.toString(), "timestamp_ms" to timestampMs.toString(), "phase" to atFailure.name, "origin" to origin.name,
             "summary" to safe.message, "causes" to org.json.JSONArray(causes), "stack" to org.json.JSONArray(stack),
-            "failure_category" to evidence.getString("category"), "operation" to evidence.getString("operation"),
-            "native_code" to evidence.get("native_code"), "root_exception" to evidence.getString("root_exception"),
-            "native_snapshot" to evidence.getJSONObject("native_snapshot"),
-            "cause_chain_truncated" to evidence.getBoolean("chain_truncated"),
+            "failure_category" to SenderFailureDiagnostics.type(root), "root_exception" to SenderFailureDiagnostics.type(root),
+            "cause_chain_truncated" to (root.cause != null),
             "last_control_receive_age_ms" to lastReceiveAgeMs?.toString(), "control_write_elapsed_ms" to writeElapsedMs?.toString(),
             "video_codec" to codec(settings.videoCodec), "audio_codec" to codec(settings.audioCodec),
             "audio_enabled" to settings.audio, "max_size" to settings.maxSize, "max_fps" to settings.maxFps,

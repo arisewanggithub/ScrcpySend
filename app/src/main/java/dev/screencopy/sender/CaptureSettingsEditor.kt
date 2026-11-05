@@ -36,8 +36,8 @@ internal class CaptureSettingsEditor(
     private val fields = linkedMapOf<String, EditText>()
     private val choices = linkedMapOf<String, Spinner>()
     private lateinit var form: LinearLayout
-    private lateinit var advanced: LinearLayout
-    private lateinit var advancedToggle: Button
+    private var videoOptionsDraft = ""
+    private var audioOptionsDraft = ""
     private lateinit var ui: SenderUi
     private val primaryTextColor get() = ui.primaryTextColor
     private val secondaryTextColor get() = ui.secondaryTextColor
@@ -46,7 +46,6 @@ internal class CaptureSettingsEditor(
     private lateinit var scroll: ScrollView
     private lateinit var audioRateInfo: TextView
     private var audioRate = 192_000
-    private var audioTransport = ""
     private var rateChoices = emptyList<Bitrates.AudioChoice>()
     private var rateContext = ""
     private var bitrateRanges = CodecBitrates()
@@ -63,6 +62,10 @@ internal class CaptureSettingsEditor(
     private data class AudioCodecChoice(val name: String, val available: Boolean = true) {
         override fun toString() = if (available) name else "Unavailable saved audio codec: $name - choose explicitly"
     }
+    private data class FrameRateChoice(val fps: Int, val available: Boolean = true) {
+        override fun toString() = if (available) "$fps FPS" else "Unavailable saved rate: $fps FPS - choose explicitly"
+    }
+    private val frameRates = listOf(15, 24, 25, 30, 48, 50, 60, 90, 120)
     private var displays = DisplayInventory(emptyList())
     private lateinit var displayInfo: TextView
     private lateinit var refreshDisplayButton: Button
@@ -94,11 +97,7 @@ internal class CaptureSettingsEditor(
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             text = "Changes are saved only with Apply. Active encoding is never changed live."
         }
-        section("Connection", first = true)
-        spinner("mediaTransportMode", "Media transport",
-            listOf("Custom TCP", "SRT (fMP4)"))
-        text("Custom TCP supports RAW, Opus and AAC. SRT requires a compatible receiver and supports Opus/AAC or audio off.")
-        section("Video")
+        section("Video", first = true)
         spinner("videoCodec", "Video codec", listOf("h264", "h265", "av1"))
         spinner("videoEncoder", "Video encoder", listOf(""))
         text("Hardware-accelerated encoders only.")
@@ -106,7 +105,8 @@ internal class CaptureSettingsEditor(
         number("videoBitrateMbps", "Video bitrate (Mbps)")
         text("Decimals allowed, e.g. 8 or 2.5. Encoder limits are checked on Apply and before capture.")
         number("maxSize", "Maximum size (0 = unlimited)")
-        number("maxFps", "Maximum FPS")
+        spinner("maxFps", "Maximum FPS", emptyList())
+        text("Capture frame-rate limit, not the phone's display refresh rate. Actual FPS depends on the device and content.")
         section("Screen & layout")
         spinner("displayId", "Screen to share", emptyList())
         displayInfo = text("")
@@ -133,7 +133,7 @@ internal class CaptureSettingsEditor(
             setPadding(paddingLeft, dp(8), paddingRight, dp(4))
         }; form.addView(audio)
         spinner("audioCodec", "Audio codec", listOf("raw", "opus", "aac"))
-        text("RAW (uncompressed PCM) is the Custom TCP default: 48 kHz stereo, about 1.536 Mbps. SRT supports only Opus and AAC.")
+        text("RAW (uncompressed PCM) is the default: 48 kHz stereo, about 1.536 Mbps.")
         spinner("audioEncoder", "Audio encoder", listOf(""))
         text("Hardware and software encoders are supported.")
         encoderInfo["audio"] = text("")
@@ -141,32 +141,6 @@ internal class CaptureSettingsEditor(
         audioRateInfo = text("")
         spinner("audioSource", "Audio source", listOf("output", "playback", "mic"))
         text("Output capture may mute local playback.")
-        section("Advanced")
-        advancedToggle = Button(activity).apply {
-            id = R.id.capture_settings_toggle_advanced
-            isAllCaps = false
-            setOnClickListener { setAdvanced(advanced.visibility != View.VISIBLE) }
-        }
-        form.addView(advancedToggle)
-        advanced = LinearLayout(activity).apply {
-            id = R.id.capture_settings_advanced
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        form.addView(advanced)
-        text("Optional encoder tuning. Existing values are kept when this section is collapsed.", advanced)
-        field("videoOptions", "Typed numeric video codec options", false, advanced)
-        field("audioOptions", "Typed numeric audio codec options", false, advanced)
-        text("SRT supports H.264/H.265/AV1 with Opus/AAC-LC or audio off. H.264/Opus verified; HEVC rotation/AAC/AV1 validation pending. AV1/audio configuration changes require a new session.", advanced)
-        text("Switching to Custom TCP selects RAW; switching from RAW to SRT selects Opus. Changes are saved only with Apply. No runtime codec/FPS/bitrate fallback.", advanced)
-        advanced.addView(Button(activity).apply {
-            text = "Available displays and encoders"
-            setOnClickListener {
-                try { AlertDialog.Builder(activity).setTitle("Pinned backend capabilities")
-                    .setMessage(requireReady().capabilities).setPositiveButton("OK", null).show() }
-                catch (e: Exception) { notice.text = e.message ?: "Capabilities unavailable" }
-            }
-        })
         text("Changes apply to the next cast. On Android 11, unlock the phone before starting. Protected content may be blank.")
         checkUpdates?.let { check ->
             section("App")
@@ -176,22 +150,6 @@ internal class CaptureSettingsEditor(
             })
         }
         audio.setOnCheckedChangeListener { _, _ -> if (!loading) rawControls() }
-        choices.getValue("mediaTransportMode").onItemSelectedListener = selected {
-            val transport = choice("mediaTransportMode")
-            if (!loading && transport != audioTransport && transport in listOf("Custom TCP", "SRT (fMP4)")) {
-                val previous = choice("audioCodec")
-                audioTransport = transport
-                val codec = Settings.audioCodecOnTransportChange(
-                    if (transport == "SRT (fMP4)") "srt" else "custom", previous)
-                audioCodecs(codec)
-                if (codec != previous) fields.getValue("audioOptions").text.clear()
-                encoders("audio", if (codec != previous) "" else choice("audioEncoder"))
-                refreshAudioRates(); rawControls()
-                notice.text = "$transport selected; audio codec: $codec." +
-                    (if (codec != previous) " Audio encoder and codec options reset for the new codec." else "") +
-                    " Apply to save."
-            }
-        }
         choices.getValue("videoCodec").onItemSelectedListener = selected {
             if (!loading) encoders("video")
         }
@@ -288,23 +246,21 @@ internal class CaptureSettingsEditor(
             putString("displayId", selectedDisplayId().toString())
             putString("audioBitrateBps", audioRate.toString())
             putBoolean("audio", audio.isChecked)
-            putBoolean("advancedExpanded", advanced.visibility == View.VISIBLE)
+            putString("videoOptions", videoOptionsDraft)
+            putString("audioOptions", audioOptionsDraft)
         }
     }
     private fun restoreFields(saved: Bundle) {
         loading = true
         try {
-            saved.getString("mediaTransportMode")?.let { label ->
-                val supported = listOf("Custom TCP", "SRT (fMP4)")
-                val available = label in supported
-                val unavailable = "Unavailable saved transport — choose explicitly"
-                setItems(choices.getValue("mediaTransportMode"),
-                    if (available) supported else listOf(unavailable) + supported)
-                select("mediaTransportMode", if (available) label else unavailable)
-                if (!available) notice.text = "Saved media transport is unavailable. Choose Custom TCP or SRT and explicitly Apply."
-            }
-            audioTransport = choice("mediaTransportMode")
+            if (saved.getString("mediaTransportMode")?.let { it != "Custom TCP" } == true)
+                notice.text = "Saved media transport is unavailable. Apply to use Custom TCP; other settings are preserved."
+            saved.getString("videoOptions")?.let { videoOptionsDraft = it }
+            saved.getString("audioOptions")?.let { audioOptionsDraft = it }
             audioCodecs(saved.getString("audioCodec") ?: choice("audioCodec"))
+            saved.getString("maxFps")?.let {
+                frameRateChoices(it.toIntOrNull() ?: throw IllegalArgumentException("Saved Maximum FPS is invalid; Reset defaults before applying."))
+            }
             for (key in listOf("videoCodec", "orientation", "audioSource"))
                 saved.getString(key)?.let { select(key, it) }
             saved.getString("receiverOrientation")?.let { select("receiverOrientation", it) }
@@ -319,17 +275,10 @@ internal class CaptureSettingsEditor(
             audio.isChecked = saved.getBoolean("audio", audio.isChecked)
             refreshAudioRates(force = true)
             rawControls()
-            setAdvanced(saved.getBoolean("advancedExpanded",
-                fields.getValue("videoOptions").text.isNotEmpty() || fields.getValue("audioOptions").text.isNotEmpty()))
         } finally { loading = false }
     }
     private fun load(s: Settings) {
         restoreFields(Bundle().apply {
-            putString("mediaTransportMode", when (s.mediaTransportMode) {
-                "srt" -> "SRT (fMP4)"
-                "custom" -> "Custom TCP"
-                else -> "Unavailable saved transport — choose explicitly"
-            })
             putString("videoCodec", s.videoCodec); putString("videoEncoder", s.videoEncoder)
             putString("orientation", s.orientation); putString("audioCodec", s.audioCodec)
             putString("receiverOrientation", receiverOrientationLabel(s.receiverOrientation))
@@ -343,24 +292,22 @@ internal class CaptureSettingsEditor(
         })
     }
     private fun read(): Settings = Settings().apply {
-        mediaTransportMode = when (choice("mediaTransportMode")) {
-            "SRT (fMP4)" -> "srt"
-            "Custom TCP" -> "custom"
-            else -> throw IllegalArgumentException("Choose Custom TCP or SRT explicitly before applying.")
-        }
         videoCodec = choice("videoCodec"); videoEncoder = choice("videoEncoder"); orientation = choice("orientation")
         receiverOrientation = when (choice("receiverOrientation")) {
             "Landscape" -> "landscape"; "Portrait" -> "portrait"; else -> "auto"
         }
         videoBitrate = Bitrates.videoBps(fields.getValue("videoBitrateMbps").text.toString())
-        maxSize = n("maxSize"); maxFps = n("maxFps"); displayId = selectedDisplayId()
+        maxSize = n("maxSize")
+        maxFps = choice("maxFps").toInt()
+        require(maxFps in frameRates) { "Choose an available Maximum FPS up to 120 before applying." }
+        displayId = selectedDisplayId()
         cropWidth = crop(CropEditorInput.Field.WIDTH); cropHeight = crop(CropEditorInput.Field.HEIGHT)
         cropX = crop(CropEditorInput.Field.X); cropY = crop(CropEditorInput.Field.Y)
-        videoOptions = fields.getValue("videoOptions").text.toString().trim()
+        videoOptions = videoOptionsDraft.trim()
         audio = this@CaptureSettingsEditor.audio.isChecked
         audioCodec = choice("audioCodec"); audioEncoder = choice("audioEncoder"); audioSource = choice("audioSource")
         audioBitrate = selectedAudioRate() ?: audioRate
-        audioOptions = fields.getValue("audioOptions").text.toString().trim()
+        audioOptions = audioOptionsDraft.trim()
         if (audioCodec == "raw") { audioEncoder = ""; audioOptions = "" }
         validate()
         val proof = requireReady().capabilities
@@ -383,19 +330,13 @@ internal class CaptureSettingsEditor(
         setPadding(0, dp(16), 0, dp(4))
     }
     private fun text(value: String, parent: LinearLayout = form) = ui.description(parent, value)
-    private fun setAdvanced(expanded: Boolean) {
-        advanced.visibility = if (expanded) View.VISIBLE else View.GONE
-        advancedToggle.text = if (expanded) "Hide advanced options" else "Show advanced options"
-        advancedToggle.stateDescription = if (expanded) "Expanded" else "Collapsed"
-    }
-    private fun number(key: String, label: String) = field(key, label, true)
-    private fun field(key: String, label: String, numeric: Boolean, parent: LinearLayout = form) {
-        val labelView = title(label, parent)
+    private fun number(key: String, label: String) {
+        val labelView = title(label, form)
         fields[key] = EditText(activity).apply {
             isSaveEnabled = false; setSingleLine(true)
             minimumHeight = dp(48)
             textSize = 16f
-            inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            inputType = InputType.TYPE_CLASS_NUMBER
             if (key == "videoBitrateMbps") {
                 id = R.id.video_bitrate
                 inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -403,8 +344,6 @@ internal class CaptureSettingsEditor(
             id = when (key) {
                 "cropWidth" -> R.id.crop_width; "cropHeight" -> R.id.crop_height
                 "cropX" -> R.id.crop_x; "cropY" -> R.id.crop_y
-                "videoOptions" -> R.id.capture_video_options
-                "audioOptions" -> R.id.capture_audio_options
                 else -> id
             }
             if (id == View.NO_ID) id = View.generateViewId()
@@ -414,7 +353,7 @@ internal class CaptureSettingsEditor(
                     if (!focused && fields[key] === view) commitOffset(cropField)
                 }
             }
-            parent.addView(this)
+            form.addView(this)
         }
     }
     private fun spinner(key: String, label: String, items: List<String>) {
@@ -427,7 +366,7 @@ internal class CaptureSettingsEditor(
                 "audioBitrate" -> R.id.audio_bitrate; "displayId" -> R.id.capture_display
                 "audioSource" -> R.id.capture_audio_source
                 "videoCodec" -> R.id.video_codec; "receiverOrientation" -> R.id.receiver_orientation
-                "mediaTransportMode" -> R.id.media_transport
+                "maxFps" -> R.id.maximum_fps
                 else -> View.generateViewId() }
             labelView.labelFor = it.id
             setItems(it, items); form.addView(it)
@@ -455,6 +394,7 @@ internal class CaptureSettingsEditor(
     private fun choice(key: String): String = when (val item = choices.getValue(key).selectedItem) {
         is EncoderChoice -> item.name
         is AudioCodecChoice -> item.name
+        is FrameRateChoice -> item.fps.toString()
         else -> item?.toString().orEmpty()
     }
     private fun select(key: String, value: String) {
@@ -463,14 +403,27 @@ internal class CaptureSettingsEditor(
             when (val item = view.getItemAtPosition(it)) {
                 is EncoderChoice -> item.name == value
                 is AudioCodecChoice -> item.name == value
+                is FrameRateChoice -> item.fps.toString() == value
                 else -> item == value
             }
         }
             ?: throw IllegalArgumentException("Saved $key is unavailable: $value")
         view.setSelection(index)
     }
+    private fun frameRateChoices(requested: Int) {
+        val values = frameRates.map { FrameRateChoice(it) } +
+            if (requested !in frameRates) listOf(FrameRateChoice(requested, false)) else emptyList()
+        choices.getValue("maxFps").adapter = object :
+            ArrayAdapter<FrameRateChoice>(activity, android.R.layout.simple_spinner_item, values) {
+            override fun areAllItemsEnabled() = values.all { it.available }
+            override fun isEnabled(position: Int) = values[position].available
+        }.apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        select("maxFps", requested.toString())
+        if (requested !in frameRates)
+            notice.text = "Saved Maximum FPS is unavailable. Choose a common frame rate up to 120, then Apply."
+    }
     private fun audioCodecs(requested: String) {
-        val supported = Settings.audioCodecs(if (choice("mediaTransportMode") == "SRT (fMP4)") "srt" else "custom")
+        val supported = Settings.audioCodecs()
         val values = supported.map { AudioCodecChoice(it) } +
             if (requested !in supported) listOf(AudioCodecChoice(requested, false)) else emptyList()
         choices.getValue("audioCodec").adapter = object :
@@ -519,7 +472,6 @@ internal class CaptureSettingsEditor(
         choices.getValue("audioSource").isEnabled = audio.isChecked
         choices.getValue("audioEncoder").isEnabled = audio.isChecked && !raw
         choices.getValue("audioBitrate").isEnabled = audio.isChecked && !raw
-        fields.getValue("audioOptions").isEnabled = audio.isChecked && !raw
     }
     private fun ranges() = bitrateRanges
     private fun selectedDisplayId() = (choices.getValue("displayId").selectedItem as? DisplayInventory.Choice)?.id
@@ -618,9 +570,10 @@ internal class CaptureSettingsEditor(
     }
     private fun showFailure(error: Exception) {
         val message = error.message ?: "Settings could not be applied"
-        if (message.contains("option", ignoreCase = true) || message.contains("max-bframes") ||
-            message.contains("aac-profile")) setAdvanced(true)
-        notice.text = "Not saved: $message"
+        val codecOptionsInvalid = message.contains("option", ignoreCase = true) || message.contains("max-bframes") ||
+            message.contains("aac-profile")
+        notice.text = "Not saved: $message" +
+            if (codecOptionsInvalid) ". Use Reset defaults, then Apply to clear saved codec tuning." else ""
         val key = when {
             error is CropEditorInput.Invalid -> error.field.key
             error is VideoGeometryException -> if (error.reason == VideoGeometryReason.FRAME_RATE) "maxFps" else "maxSize"
@@ -633,7 +586,8 @@ internal class CaptureSettingsEditor(
             message.contains("Maximum FPS", ignoreCase = true) || message.contains("maxFps") -> "maxFps"
             else -> null
         }
-        key?.let { fields.getValue(it) }?.let { view ->
+        if (key == "maxFps") choices.getValue("maxFps").requestFocus()
+        key?.let { fields[it] }?.let { view ->
             view.error = message
             view.requestFocus()
             val current = dialog

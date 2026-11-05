@@ -70,8 +70,8 @@ function Assert-Separation($appClasses, $testClasses, [string]$id) {
         }
     }
     $roots = if ($id -eq 'dev.screencopy.sender') {
-        @('Ldev/screencopy/sender/SrtNative;', 'Ldev/screencopy/sender/ShellCaptureService;')
-    } else { @('Lorg/screencopy/receiver/media/SrtNative;', 'Lorg/screencopy/receiver/media/OpusDecoder;') }
+        @('Ldev/screencopy/sender/ShellCaptureService;')
+    } else { @('Lorg/screencopy/receiver/media/OpusDecoder;') }
     foreach ($type in $roots) {
         if ($type -cnotin $appClasses -or $type -cin $testClasses) { throw 'JNI/reflection roots must exist exclusively in optimized app DEX' }
     }
@@ -79,20 +79,20 @@ function Assert-Separation($appClasses, $testClasses, [string]$id) {
 }
 
 if ($SelfTest) {
-    $roots = @('Lorg/screencopy/receiver/media/SrtNative;', 'Lorg/screencopy/receiver/media/OpusDecoder;')
-    Assert-Separation $roots @('Ltest/Test;') 'org.screencopy.receiver'
-    Assert-Separation $roots @('Ldev/scrcpy/releasecheck/NativeSrtCheck;') 'org.screencopy.receiver'
+    $roots = @('Ldev/screencopy/sender/ShellCaptureService;')
+    Assert-Separation $roots @('Ltest/Test;') 'dev.screencopy.sender'
+    Assert-Separation $roots @('Ldev/scrcpy/releasecheck/SourceCryptoCheck;') 'dev.screencopy.sender'
     foreach ($badTest in @('Lorg/conscrypt/Conscrypt;', 'Ldev/screencopy/sender/LocalAdb;',
         'Ldev/screencopy/sender/CodecConfig;', 'Ldev/screencopy/sender/MainActivity;',
         'Ldev/screencopy/sender/Secrets;', 'Ldev/screencopy/sender/Wire;',
         'Lorg/screencopy/receiver/test/Wire;',
         'Ldev/screencopy/sender/SyntheticEncodedFixture;', $roots[0])) {
         $rejected = $false
-        try { Assert-Separation $roots @($badTest) 'org.screencopy.receiver' } catch { $rejected = $true }
+        try { Assert-Separation $roots @($badTest) 'dev.screencopy.sender' } catch { $rejected = $true }
         if (!$rejected) { throw 'Invalid test implementation was accepted' }
     }
     $rejected = $false
-    try { Assert-Separation ($roots + 'Ldev/scrcpy/update/UpdateTestActivity;') @() 'org.screencopy.receiver' } catch { $rejected = $true }
+    try { Assert-Separation ($roots + 'Ldev/scrcpy/update/UpdateTestActivity;') @() 'dev.screencopy.sender' } catch { $rejected = $true }
     if (!$rejected) { throw 'Debug fixture was accepted' }
     $descriptor = [Text.Encoding]::UTF8.GetBytes('Lsample/A;')
     $data = [byte[]]::new(153 + $descriptor.Length + 1)

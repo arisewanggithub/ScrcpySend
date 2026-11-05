@@ -35,56 +35,13 @@ not ScrcpySend / ScrcpyRecv peer trust.
 | JUnit (tests only) | 4.13.2 | EPL-1.0 |
 | org.json (tests only) | 20240303 | Public domain |
 | Mockito (tests only) | 5.15.2 | MIT |
-| libsrt (SRT-enabled builds; encryption disabled) | 1.5.7 | MPL-2.0 |
-| AndroidX Media3 common/container/muxer | 1.11.1 | Apache-2.0 |
-| Robolectric / Media3 extractor (host tests only) | 4.16.1 / 1.11.1 | MIT / Apache-2.0 |
+| AndroidX Media3 common/container | 1.11.1 | Apache-2.0 |
 
-The independent `-PsrtTrial=true` build statically links only pinned libsrt into
-`screencopy_srt`; CMake verifies its SHA-256 manifest before extraction into the
-build directory. It does not link libwebm or libopus.
-Preserve the complete upstream licenses/notices and supply the pinned libsrt
-source (including any modifications) alongside distributions to satisfy MPL-2.0.
-The APK bundles the complete upstream MPL text in
-`assets/licenses/SRT-1.5.7-MPL-2.0.txt`, SRT/UDT/MD5 notices in
-`assets/licenses/SRT-1.5.7-NOTICES.txt`, and the complete unmodified corresponding
-source in `assets/sources/srt-1.5.7.tar.gz` (SHA-256
-`017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b`).
-The archive retains every upstream source-file copyright and license notice;
-ScrcpySend's separate JNI adapter/build integration does not modify libsrt.
-The Java sender uses Media3 container OpusUtil for packet duration/initialization,
-not an Opus decoder. Media3 common/container and transitive Guava keep their
-upstream Apache-2.0 notices.
-
-The muxer source origin is the official Google Maven artifact
-`androidx.media3:media3-muxer:1.11.1:sources`:
-https://dl.google.com/dl/android/maven2/androidx/media3/media3-muxer/1.11.1/media3-muxer-1.11.1-sources.jar
-SHA-256: `eefa3f69ad13ccc7c59988bd934cc90653fe24ea64f1eb072db5cf9a674ea47e`.
-[The streaming module](streaming-muxer/build.gradle) verifies this pin and retains
-upstream Apache headers while applying strict-context patches for live fragment
-flush, standard AVC `avc3` / HEVC `hev1` sample entries, actual HEVC VPS temporal
-metadata, version-1 tfdt/moof offsets, video/Opus/AAC durations and dOps byte order.
-The small StreamingBoxes helper is an explicitly marked local modification,
-not a replacement MP4 implementation. Supply these patches/source with the
-original notices. No upstream NOTICE file is present in the official source JAR;
-the bundled app notice records the source origin and modifications.
-The streaming module also bundles the complete Apache-2.0 text as
-`assets/licenses/Media3-Apache-2.0.txt`.
-AAC uses actual ASC frameLengthFlag for 1024/960 sample durations. The local
-StreamingCodecConfig adapter calls the unmodified official Av1ConfigUtil to
-serialize actual sequence/metadata OBUs; official Media3 still constructs av1C
-and av01. Codec tests include attributed short upstream Apache-2.0 test vectors.
-No codec decoder or copied custom container is bundled in the streaming module.
-Generated Java sources use a concrete source-set directory, matching AGP 9's
-supported pattern, with an explicit JavaCompile dependency on preparation.
-This module compiles its complete pinned source cohort
-non-incrementally: regeneration/patching must not leave javac resolving a partial
-changed subset without its unchanged same-package classes. No classes are excluded.
-The compilation task tracks this build script so compilation-model fixes invalidate
-stale outputs; changing Gradle's internal incremental option alone does not do so.
-Raw Android AV1 CSD is kept as actual first-sample sequence/metadata OBUs, not passed
-as Format initialization data: upstream interprets nonempty AV1 initialization
-as an already serialized av1C record. Empty muxer Format initialization invokes
-the official record parser from the nonempty real first sample.
+Media3 container's AV1 OBU/sequence parser validates the Custom TCP video
+configuration and packets. Media3 common/container and transitive Guava keep
+their upstream Apache-2.0 notices. The complete Apache-2.0 text is bundled at
+`assets/licenses/Media3-Apache-2.0.txt`. Codec tests include attributed short
+upstream Apache-2.0 test vectors. No container muxer or codec decoder is bundled.
 
 The LAN protocol does not use QR scanning, camera permission or peer certificate
 generation. Crypto dependencies support the bundled Android wireless ADB utility.
@@ -95,8 +52,7 @@ Preserve [the bundled notices](app/src/main/assets/NOTICE.txt),
 SPAKE2 and Conscrypt are distributed as pinned AAR dependencies. The first-party
 direct-child capture supervisor requires **NDK27.2.12479018** and is built for
 arm64-v8a, armeabi-v7a, x86 and x86_64. Its small C source is original first-party
-code, not copied from Shizuku or scrcpy. App/state/UI remain Kotlin; the streaming
-module contains the pinned upstream Java muxer and a narrow Java box helper.
+code, not copied from Shizuku or scrcpy. App/state/UI remain Kotlin.
 NDK toolchain/sysroot redistribution notices are
 copied from that pinned SDK package into generated APK assets/licenses. Node22
 is a host-test tool only, not bundled; it executes the freestanding native

@@ -9,8 +9,8 @@ setup, build profiles and release gates are in [README.md](README.md).
 
 ## Trust and endpoint ownership
 
-Discovery, control and media are unauthenticated and unencrypted. SRT AES is
-disabled. Receiver names are labels: actual UDP-source IP plus advertised TCP
+Discovery, control and media are unauthenticated and unencrypted.
+Receiver names are labels: actual UDP-source IP plus advertised TCP
 port identifies the selected endpoint. Discovery refreshes names/availability,
 expires idle rows and resets after network changes. Matching names cannot
 redirect an active request. Trusted private LAN access is required.
@@ -30,7 +30,7 @@ Activity / applied immutable request
   -> non-daemon UserService / owned read-only artifact FDs
   -> checksum-pinned scrcpy-server3.3.4 + native supervisor
   -> owned video/audio FDs
-  -> negotiated SRT or custom TCP sink
+  -> Custom TCP sink
 ```
 
 Shizuku API/provider13.1.5 provides generated AIDL and a protected provider.
@@ -49,46 +49,11 @@ mechanism. It carries no input/clipboard/power messages and is never exposed
 as a LAN control channel or Binder media track. Media remains video/audio only.
 Large payloads travel through FDs, not Binder transactions.
 
-## SRT / fragmented MP4
+## Custom TCP transport
 
-```text
-wire protocol version 3 request + explicit SRT SESSION_ACCEPT
-  -> libsrt listener pinned to actual control peer/session
-  -> bounded mux actor / Media3 FragmentedMp4Muxer1.11.1
-  -> standard fMP4 / cancellable SRT transport
-  -> ScrcpyRecv Media3 extraction/renderers
-```
-
-libsrt1.5.7 is transport only. Its pinned sources, checksum and MPL notices
-remain distributed. Media3 muxer sources are pinned and prepared with
-context-checked changes for fragment flush/timestamps and codec metadata;
-upstream headers/notices are retained. No custom replacement MP4 demuxer or
-receiver playback clock is introduced.
-
-H.264/H.265/AV1 and Opus/AAC-LC/audio-off are admitted explicitly. PCM is
-unsupported in this profile. AVC `avc3` uses actual in-band SPS/PPS before a
-real IDR. HEVC `hev1`/hvcC uses complete actual VPS/SPS/PPS and authentic IRAP
-flags. AV1 uses actual configuration/sequence OBUs. Metadata, payloads,
-timestamps and key flags are not fabricated.
-
-Audio duration parsing preserves Opus/AAC FIFO and a rational timeline anchored
-once to source time; no decode/re-encode, resampling or packet sorting occurs.
-The common first-track origin preserves audio/video offsets. A bounded periodic
-flush permits static-video/audio progress without waiting for another keyframe.
-Admission includes actor-queued and mux-pending samples: 8MiB/240 video frames
-and 1MiB/100 audio packets. Overflow or unsupported configuration changes fail
-explicitly. Late-packet dropping is disabled to protect container bytes.
-
-AVC/HEVC configuration changes require complete real metadata before the
-corresponding sync picture. AV1/audio configuration changes require a supported
-new session. This does not certify hardware decoder adaptation or rotation.
-
-## Custom TCP compatibility
-
-The default local profile uses wire protocol version 3 bounded framing, explicit stream configuration
+The sender uses wire protocol version 3 bounded framing, explicit stream configuration
 and readiness, internal session/track generations and negotiated codec metadata.
-SRT-enabled builds retain this selectable path. Present unsupported transports
-never choose custom TCP implicitly.
+Unavailable saved transports require explicit correction in Settings.
 
 ScrcpyRecv validates real decoder support and track readiness. Source settings,
 packet boundaries, canonical OpusHead and original payload order remain
@@ -104,8 +69,8 @@ through startup, playback and teardown. A detached UI callback cannot clear
 service-owned state or act on a newer receiver.
 
 Stop, permission loss, network failure or backend termination retires only
-matching resources. Native transport is closed first to wake blocked I/O,
-then capture readers/mux work are joined with bounded ownership-aware cleanup.
+matching resources. Capture resources and the TCP connection are closed and
+workers are joined with bounded ownership-aware cleanup.
 The first terminal outcome wins over late teardown failures. Retry is explicit
 and only becomes available after cleanup.
 
@@ -122,7 +87,7 @@ single-signer/hash/package validation, scoped FileProvider and explicit
 permission/install/retry actions. Checking/downloading never stops capture,
 and installation is guarded by final idle-cast checks.
 
-CI validates both build profiles and selects only the remote-update UI class
+CI validates the app and selects only the remote-update UI class
 on a disposable API35 emulator. It does not run real screen capture/H.265 Stop
 or claim hardware acceptance. H.265 capture/Stop/recast safety remains
 unverified because kernel-panic risk has been reported; synthetic tests do

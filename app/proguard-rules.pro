@@ -1,9 +1,3 @@
-# C++ exports Java_dev_screencopy_sender_SrtNative_* by declaring class and method name.
-# Root the binding as well as its native methods; other members remain shrinkable.
--keep,allowoptimization class dev.screencopy.sender.SrtNative {
-    native <methods>;
-}
-
 # Shizuku loads this Binder UserService outside the manifest via its class name
 # and public no-argument constructor. AIDL calls are ordinary reachable code.
 -keep,allowoptimization class dev.screencopy.sender.ShellCaptureService {

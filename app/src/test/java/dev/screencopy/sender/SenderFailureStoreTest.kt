@@ -2,13 +2,11 @@ package dev.screencopy.sender
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.media3.muxer.MuxerException
 import java.io.IOException
 import org.junit.Assert.*
 import org.junit.Test
 import org.mockito.Mockito
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SenderFailureStoreTest {
     private class StoredPreferences {
         val context = Mockito.mock(Context::class.java)
@@ -46,13 +44,13 @@ class SenderFailureStoreTest {
         stored.values["lastQueueFailure"] = "old queue history"
         stored.values["lastFailure"] = "queue old queue history"
         stored.start(11)
-        val privateText = "srt://private-peer.invalid?password=secret payload=captured"
-        val root = IOException("SRT send: $privateText (code 2001) | snapshot snapshot=available state=6 packets_sent=17").apply {
-            stackTrace = arrayOf(StackTraceElement("dev.screencopy.sender.SrtNative", "write", privateText, 108))
+        val privateText = "tcp://private-peer.invalid?password=secret payload=captured"
+        val root = java.net.SocketTimeoutException(privateText).apply {
+            stackTrace = arrayOf(StackTraceElement("dev.screencopy.sender.ReceiverLink", "send", privateText, 108))
         }
-        val error = IOException("CAPTURE_FAILED: fMP4 mux failed", MuxerException(privateText, root))
+        val error = IOException("CAPTURE_FAILED: output failed", IOException(privateText, root))
         val settings = Settings().apply {
-            mediaTransportMode = "srt"; videoEncoder = privateText; audioOptions = privateText
+            audioCodec = "opus"; videoEncoder = privateText; audioOptions = privateText
             cropWidth = 1080; cropHeight = 1920
         }
         val trace = SessionStopTrace(stored::record)
@@ -64,25 +62,21 @@ class SenderFailureStoreTest {
         assertEquals(1700000000123L, record.getLong("timestamp_ms"))
         assertEquals("STREAMING", record.getString("phase"))
         assertEquals("CAPTURE", record.getString("origin"))
-        assertEquals("BROKEN", record.getString("failure_category"))
-        assertEquals("SEND", record.getString("operation"))
-        assertEquals(2001, record.getInt("native_code"))
-        assertEquals("IO", record.getString("root_exception"))
-        assertEquals("17", record.getJSONObject("native_snapshot").getString("packets_sent"))
-        assertEquals("6", record.getJSONObject("native_snapshot").getString("state"))
+        assertEquals("TIMEOUT", record.getString("failure_category"))
+        assertEquals("TIMEOUT", record.getString("root_exception"))
         assertEquals("h264", record.getString("video_codec"))
         assertEquals("opus", record.getString("audio_codec"))
         assertEquals(1080, record.getInt("crop_width"))
         assertEquals(1920, record.getInt("crop_height"))
-        assertEquals("CAPTURE_FAILED: SRT failure stage=FMP4_MUX root=IO category=BROKEN operation=SEND code=2001",
+        assertEquals("CAPTURE_FAILED: Sender failure stage=SESSION root=TIMEOUT category=TIMEOUT",
             record.getString("summary"))
-        assertTrue(record.getJSONArray("causes").toString().contains("depth=2 type=IO category=BROKEN operation=SEND code=2001"))
-        assertTrue(record.getJSONArray("stack").toString().contains("SrtNative.write line=108"))
+        assertTrue(record.getJSONArray("causes").toString().contains("depth=2 type=TIMEOUT"))
+        assertTrue(record.getJSONArray("stack").toString().contains("ReceiverLink.send line=108"))
         assertFalse(record.toString().contains("private-peer"))
         assertFalse(record.toString().contains("secret"))
         assertEquals("old queue history", stored.values["lastQueueFailure"])
         val saved = stored.values["lastSessionFailure"]
-        trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.CLEANUP,
+        trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.CLEANUP,
             SessionOutcome.Origin.CLEANUP, 11, settings, 1700000000999L)
         stored.record("sender_queue_failure later teardown")
         assertEquals(saved, stored.values["lastSessionFailure"])
@@ -90,25 +84,25 @@ class SenderFailureStoreTest {
         val ui = SenderFailureStore.read(stored.context)!!
         assertTrue(ui.startsWith("Last sender session failure at "))
         assertTrue(ui.contains("phase=STREAMING"))
-        assertTrue(ui.contains("category=BROKEN operation=SEND code=2001"))
+        assertTrue(ui.contains("category=TIMEOUT"))
     }
 
     @Test fun newSessionCannotBeMistakenForOldFailureOrOverwrittenByLateOldCallback() {
         val stored = StoredPreferences()
         val trace = SessionStopTrace(stored::record)
-        val settings = Settings().apply { mediaTransportMode = "srt" }
+        val settings = Settings()
         stored.start(1)
-        trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.STREAMING,
+        trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.STREAMING,
             SessionOutcome.Origin.CAPTURE, 1, settings, 2000)
         stored.start(2)
         assertTrue(SenderFailureStore.read(stored.context)!!.startsWith("Previous sender session failure at "))
-        trace.firstFailure(IOException("SRT send made no progress within one second"), SessionStopTrace.Phase.STREAMING,
+        trace.firstFailure(java.net.SocketTimeoutException("Write timed out"), SessionStopTrace.Phase.STREAMING,
             SessionOutcome.Origin.CAPTURE, 2, settings, 3000)
-        trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.CLEANUP,
+        trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.CLEANUP,
             SessionOutcome.Origin.CLEANUP, 1, settings, 4000)
         assertEquals(2L, stored.failure().getLong("session"))
         assertEquals(3000L, stored.failure().getLong("timestamp_ms"))
-        assertTrue(SenderFailureStore.read(stored.context)!!.contains("category=NO_PROGRESS operation=SEND"))
+        assertTrue(SenderFailureStore.read(stored.context)!!.contains("category=TIMEOUT"))
         Mockito.verify(stored.editor, Mockito.never()).clear()
     }
 
@@ -119,8 +113,8 @@ class SenderFailureStoreTest {
         trace.sessionStarted(id)
         assertEquals(id, stored.values["currentSessionId"])
         assertTrue((stored.values["currentSessionStartedAt"] as Long) > Int.MAX_VALUE)
-        trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.STREAMING,
-            SessionOutcome.Origin.CAPTURE, id, Settings().apply { mediaTransportMode = "srt" }, 1700000000123L)
+        trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.STREAMING,
+            SessionOutcome.Origin.CAPTURE, id, Settings(), 1700000000123L)
         assertEquals(id.toString(), stored.failure().getString("session"))
         assertEquals("1700000000123", stored.failure().getString("timestamp_ms"))
         assertTrue(SenderFailureStore.read(stored.context)!!.startsWith("Last sender session failure at "))
@@ -143,10 +137,10 @@ class SenderFailureStoreTest {
 
     @Test fun actualSenderCaptureFailureCallbackPersistsFirstErrorButNotLaterCancellationOrReceiverFault() {
         val stored = StoredPreferences()
-        val settings = Settings().apply { mediaTransportMode = "srt" }
+        val settings = Settings()
         val session = SenderSession(stored.context, settings, ReceiverTarget("192.0.2.1", 27184), {}, {}, stored::record)
-        val root = IOException("SRT send made no progress within one second")
-        val safe = SrtFailureDiagnostics.sanitize(IOException("CAPTURE_FAILED: fMP4 mux failed", MuxerException("mux", root)))
+        val root = java.net.SocketTimeoutException("Write timed out")
+        val safe = SenderFailureDiagnostics.sanitize(IOException("CAPTURE_FAILED: output failed", root))
         val before = System.currentTimeMillis()
         session.captureFailed(safe)
         val after = System.currentTimeMillis()

@@ -13,10 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Unencrypted, unauthenticated trusted-LAN endpoint transport. */
 class ReceiverLink(private val target: ReceiverTarget) : Closeable {
     private val socket = Socket()
-    val localAddress: String get() = socket.localAddress.hostAddress
-        ?: throw IOException("Receiver socket has no local address")
-    val peerAddress: String get() = socket.inetAddress?.hostAddress
-        ?: throw IOException("Receiver socket has no peer address")
 
     fun connect(timeoutMillis: Long = 10_000) {
         require(timeoutMillis > 0) { "Startup deadline must be positive" }

@@ -92,35 +92,26 @@ class SessionStopTest {
         }
     }
 
-    @Test fun cleanupCancelsNativeSinkBeforeJoiningCaptureReaders() {
+    @Test fun cleanupClosesCaptureBackend() {
         val backend = Mockito.mock(CaptureBackend::class.java)
-        val srt = Mockito.mock(SrtSender::class.java)
         val session = SenderSession(Mockito.mock(Context::class.java),
-            Settings().apply { audio = false; videoCodec = "unsupported"; mediaTransportMode = "srt" },
+            Settings().apply { audio = false; videoCodec = "unsupported" },
             ReceiverTarget("127.0.0.1", 27184), {}, {}, {})
-        for ((name, value) in listOf("backend" to backend, "srt" to srt)) {
-            SenderSession::class.java.getDeclaredField(name).apply { isAccessible = true }.set(session, value)
-        }
+        SenderSession::class.java.getDeclaredField("backend").apply { isAccessible = true }.set(session, backend)
         session.run()
-        val order = Mockito.inOrder(srt, backend)
-        order.verify(srt).close()
-        order.verify(backend).close()
+        Mockito.verify(backend).close()
     }
 
-    @Test fun cleanupCancelsSrtBeforeJoiningCaptureReadersAndRetainsFirstFailure() {
+    @Test fun cleanupClosesCaptureAndRetainsFirstFailure() {
         val backend = Mockito.mock(CaptureBackend::class.java)
-        val srt = Mockito.mock(SrtSender::class.java)
         val logs = mutableListOf<String>()
         val session = SenderSession(Mockito.mock(Context::class.java),
-            Settings().apply { audio = false; videoCodec = "unsupported"; mediaTransportMode = "srt" },
+            Settings().apply { audio = false; videoCodec = "unsupported" },
             ReceiverTarget("127.0.0.1", 27184), {}, {}, logs::add)
-        for ((name, value) in listOf("backend" to backend, "srt" to srt))
-            SenderSession::class.java.getDeclaredField(name).apply { isAccessible = true }.set(session, value)
-        Mockito.doThrow(IOException("CAPTURE_FAILED: later mux close")).`when`(srt).close()
+        SenderSession::class.java.getDeclaredField("backend").apply { isAccessible = true }.set(session, backend)
+        Mockito.doThrow(IOException("CAPTURE_FAILED: later capture close")).`when`(backend).close()
         session.run()
-        val order = Mockito.inOrder(srt, backend)
-        order.verify(srt).close()
-        order.verify(backend).close()
+        Mockito.verify(backend).close()
         assertTrue(logs.any { it.contains("retained=false") })
         assertEquals(Wire.ERROR, session.terminalMessage().type)
         assertEquals("INTERNAL", session.terminalMessage().json().getString("code"))

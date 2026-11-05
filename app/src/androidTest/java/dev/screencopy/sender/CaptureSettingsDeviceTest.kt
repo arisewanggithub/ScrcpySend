@@ -35,6 +35,10 @@ import java.util.concurrent.TimeUnit
 /** Native editor fixture only; synthetic UI readiness does not claim capture capability. */
 @RunWith(AndroidJUnit4::class)
 class CaptureSettingsDeviceTest {
+    private fun allText(view: View): List<TextView> =
+        (if (view is TextView) listOf(view) else emptyList()) +
+            (if (view is ViewGroup) (0 until view.childCount).flatMap { allText(view.getChildAt(it)) } else emptyList())
+
     @Before fun requireUnlockedScreen() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue("Visible settings tests require the user to unlock the phone",
@@ -165,7 +169,7 @@ class CaptureSettingsDeviceTest {
         }
     }
 
-    @Test fun mediaTransportSurvivesApplyReopenFreshEditorDraftRestoreAndReset() {
+    @Test fun customTcpNeedsNoTransportChoiceAcrossApplyReopenDraftAndReset() {
         assumeTrue("Do not interfere with an active session", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -179,47 +183,29 @@ class CaptureSettingsDeviceTest {
         var editor: CaptureSettingsEditor? = null
         var dialog: AlertDialog? = null
         try {
-            for ((mode, label) in listOf(
-                "srt" to "SRT (fMP4)",
-                "custom" to "Custom TCP"
-            )) {
-                instrumentation.runOnMainSync {
-                    editor = newEditor()
-                    dialog = editor!!.show()
-                    val transport = dialog!!.findViewById<Spinner>(R.id.media_transport)
-                    transport.setSelection((0 until transport.count).single {
-                        transport.getItemAtPosition(it) == label
-                    })
-                }
-                instrumentation.waitForIdleSync()
-                instrumentation.runOnMainSync {
-                    dialog!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                    assertFalse(editor!!.showing)
-                    assertEquals(mode, CaptureSettingsStore(preferences).read().mediaTransportMode)
-                    dialog = editor!!.show()
-                    assertEquals("Reopening must retain $mode", label,
-                        dialog!!.findViewById<Spinner>(R.id.media_transport).selectedItem)
-                    editor!!.dismiss()
-                    editor = newEditor()
-                    dialog = editor!!.show()
-                    assertEquals("Loading saved settings must retain $mode", label,
-                        dialog!!.findViewById<Spinner>(R.id.media_transport).selectedItem)
-                    val draft = editor!!.save()
-                    editor!!.dismiss()
-                    editor = newEditor().apply { restore(draft) }
-                    dialog = editor!!.show()
-                    assertEquals("Restoring a draft must retain $mode", label,
-                        dialog!!.findViewById<Spinner>(R.id.media_transport).selectedItem)
-                    dialog!!.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
-                    assertEquals("Reset must restore Custom TCP", "Custom TCP",
-                        dialog!!.findViewById<Spinner>(R.id.media_transport).selectedItem)
-                }
-                instrumentation.waitForIdleSync()
-                instrumentation.runOnMainSync {
-                    dialog!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                    assertFalse(editor!!.showing)
-                    assertEquals("custom", store.read().mediaTransportMode)
-                }
+            instrumentation.runOnMainSync {
+                editor = newEditor()
+                dialog = editor!!.show()
+                assertFalse(allText(checkNotNull(dialog!!.window).decorView).any { it.text.toString() == "Media transport" })
+                assertFalse(editor!!.save().containsKey("mediaTransportMode"))
+                dialog!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(editor!!.showing)
+                assertEquals("custom", store.read().mediaTransportMode)
+                editor!!.show()
+                editor!!.dismiss()
+                editor = newEditor()
+                editor!!.show()
+                val draft = editor!!.save()
+                assertFalse(draft.containsKey("mediaTransportMode"))
+                editor!!.dismiss()
+                editor = newEditor().apply { restore(draft) }
+                dialog = editor!!.show()
+                assertFalse(allText(checkNotNull(dialog!!.window).decorView).any { it.text.toString() == "Media transport" })
+                dialog!!.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+                dialog!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(editor!!.showing)
+                assertEquals("custom", store.read().mediaTransportMode)
+                assertFalse(store.read().request().has("mediaTransportMode"))
             }
         } finally {
             instrumentation.runOnMainSync { editor?.dismiss(); activity.finish() }
@@ -227,7 +213,7 @@ class CaptureSettingsDeviceTest {
         }
     }
 
-    @Test fun removedSavedTransportRequiresUserChoiceAndPreservesOtherFields() {
+    @Test fun removedSavedTransportRequiresApplyAndPreservesOtherFields() {
         assumeTrue("Do not interfere with an active session", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -248,11 +234,9 @@ class CaptureSettingsDeviceTest {
                 editor = CaptureSettingsEditor(activity, store,
                     { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
                 val dialog = editor!!.show()
-                val transport = dialog.findViewById<Spinner>(R.id.media_transport)
-                assertTrue(transport.selectedItem.toString().startsWith("Unavailable saved transport"))
                 assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("unavailable"))
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                assertTrue(editor!!.showing)
+                assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("Apply to use Custom TCP"))
+                assertThrows(IllegalArgumentException::class.java) { store.read() }
                 assertEquals(saved, preferences.getString("capture", null))
                 val draft = editor!!.save()
                 editor!!.dismiss()
@@ -260,16 +244,14 @@ class CaptureSettingsDeviceTest {
                     { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
                     .apply { restore(draft) }
                 val reopened = editor!!.show()
-                val restored = reopened.findViewById<Spinner>(R.id.media_transport)
-                assertTrue(restored.selectedItem.toString().startsWith("Unavailable saved transport"))
-                restored.setSelection((0 until restored.count).single { restored.getItemAtPosition(it) == "SRT (fMP4)" })
+                assertTrue(reopened.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("Apply to use Custom TCP"))
+                assertEquals(saved, preferences.getString("capture", null))
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
                 editor!!.show().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 assertFalse(editor!!.showing)
-                val expected = org.json.JSONObject(saved).put("mediaTransportMode", "srt")
-                expected.getJSONObject("audio").put("codec", "opus")
+                val expected = org.json.JSONObject(saved).apply { remove("mediaTransportMode") }
                 assertEquals(Settings.from(expected).request().toString(), store.read().request().toString())
             }
         } finally {
@@ -403,17 +385,18 @@ class CaptureSettingsDeviceTest {
         }
     }
 
-    @Test fun transportChangesFilterAudioCodecsAndSelectDefaultsOnlyInTheDraft() {
+    @Test fun transportCorrectionPreservesSavedAudioCodecAndOptions() {
         assumeTrue("Do not interfere with an active session", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val name = "transport-audio-ui-test-${UUID.randomUUID()}"
         val preferences = context.getSharedPreferences(name, 0)
         val store = CaptureSettingsStore(preferences)
-        store.write(Settings().apply {
-            mediaTransportMode = "srt"; audioCodec = "aac"; audioEncoder = "aac.fixture"
+        val settings = Settings().apply {
+            mediaTransportMode = "removed-transport"; audioCodec = "aac"; audioEncoder = "aac.fixture"
             audioOptions = "aac-profile=2"; audioBitrate = 128_000
-        })
+        }
+        assertTrue(preferences.edit().putString("capture", settings.request().toString()).commit())
         val saved = preferences.getString("capture", null)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -423,13 +406,6 @@ class CaptureSettingsDeviceTest {
         fun codecNames(): List<String> = dialog.findViewById<Spinner>(R.id.audio_codec).let { codec ->
             (0 until codec.count).map { codec.getItemAtPosition(it).toString() }
         }
-        fun transport(label: String) {
-            instrumentation.runOnMainSync {
-                val view = dialog.findViewById<Spinner>(R.id.media_transport)
-                view.setSelection((0 until view.count).single { view.getItemAtPosition(it) == label })
-            }
-            instrumentation.waitForIdleSync()
-        }
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store, proof, { false }, {})
@@ -437,25 +413,23 @@ class CaptureSettingsDeviceTest {
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                assertEquals(listOf("opus", "aac"), codecNames())
+                assertEquals(listOf("raw", "opus", "aac"), codecNames())
                 assertEquals("aac", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
                 assertEquals("aac.fixture", editor!!.save().getString("audioEncoder"))
                 assertEquals("aac-profile=2", editor!!.save().getString("audioOptions"))
             }
-            transport("Custom TCP")
             instrumentation.runOnMainSync {
                 assertEquals(listOf("raw", "opus", "aac"), codecNames())
-                assertEquals("raw", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
-                assertFalse(dialog.findViewById<Spinner>(R.id.audio_encoder).isEnabled)
-                assertFalse(dialog.findViewById<Spinner>(R.id.audio_bitrate).isEnabled)
-                assertEquals("", editor!!.save().getString("audioEncoder"))
-                assertEquals("", editor!!.save().getString("audioOptions"))
+                assertEquals("aac", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
+                assertTrue(dialog.findViewById<Spinner>(R.id.audio_encoder).isEnabled)
+                assertTrue(dialog.findViewById<Spinner>(R.id.audio_bitrate).isEnabled)
+                assertEquals("aac.fixture", editor!!.save().getString("audioEncoder"))
+                assertEquals("aac-profile=2", editor!!.save().getString("audioOptions"))
                 assertEquals(saved, preferences.getString("capture", null))
             }
-            transport("SRT (fMP4)")
             instrumentation.runOnMainSync {
-                assertEquals(listOf("opus", "aac"), codecNames())
-                assertEquals("opus", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
+                assertEquals(listOf("raw", "opus", "aac"), codecNames())
+                assertEquals("aac", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
                 assertTrue(dialog.findViewById<Spinner>(R.id.audio_encoder).isEnabled)
                 assertTrue(dialog.findViewById<Spinner>(R.id.audio_bitrate).isEnabled)
                 val draft = editor!!.save()
@@ -465,13 +439,13 @@ class CaptureSettingsDeviceTest {
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                assertEquals(listOf("opus", "aac"), codecNames())
-                assertEquals("opus", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
+                assertEquals(listOf("raw", "opus", "aac"), codecNames())
+                assertEquals("aac", dialog.findViewById<Spinner>(R.id.audio_codec).selectedItem.toString())
                 assertEquals(saved, preferences.getString("capture", null))
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 assertFalse(editor!!.showing)
-                assertEquals("srt", store.read().mediaTransportMode)
-                assertEquals("opus", store.read().audioCodec)
+                assertEquals("custom", store.read().mediaTransportMode)
+                assertEquals("aac", store.read().audioCodec)
                 assertEquals(128_000, store.read().audioBitrate)
             }
         } finally {
@@ -480,13 +454,13 @@ class CaptureSettingsDeviceTest {
         }
     }
 
-    @Test fun savedUnsupportedSrtRawRequiresCorrectionInsteadOfSilentSubstitution() {
+    @Test fun savedUnsupportedAudioCodecRequiresCorrectionInsteadOfSilentSubstitution() {
         assumeTrue("Do not interfere with an active session", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val name = "invalid-transport-audio-ui-test-${UUID.randomUUID()}"
         val preferences = context.getSharedPreferences(name, 0)
-        val saved = Settings().apply { mediaTransportMode = "srt"; audioCodec = "raw" }.request().toString()
+        val saved = Settings().apply { audioCodec = "removed-codec" }.request().toString()
         assertTrue(preferences.edit().putString("capture", saved).commit())
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -502,7 +476,7 @@ class CaptureSettingsDeviceTest {
             instrumentation.runOnMainSync {
                 val codec = dialog.findViewById<Spinner>(R.id.audio_codec)
                 val adapter = codec.adapter as android.widget.ListAdapter
-                assertEquals(listOf("opus", "aac"), (0 until codec.count).filter { adapter.isEnabled(it) }
+                assertEquals(listOf("raw", "opus", "aac"), (0 until codec.count).filter { adapter.isEnabled(it) }
                     .map { codec.getItemAtPosition(it).toString() })
                 assertFalse(adapter.isEnabled(codec.selectedItemPosition))
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
@@ -596,9 +570,6 @@ class CaptureSettingsDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         var editor: CaptureSettingsEditor? = null
         lateinit var dialog: AlertDialog
-        fun allText(view: View): List<TextView> =
-            (if (view is TextView) listOf(view) else emptyList()) +
-                (if (view is ViewGroup) (0 until view.childCount).flatMap { allText(view.getChildAt(it)) } else emptyList())
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
@@ -609,7 +580,7 @@ class CaptureSettingsDeviceTest {
             instrumentation.runOnMainSync {
                 val labels = allText(checkNotNull(dialog.window).decorView)
                 val headings = labels.filter { it.isAccessibilityHeading }
-                assertEquals(listOf("Connection", "Video", "Screen & layout", "Audio", "Advanced"),
+                assertEquals(listOf("Video", "Screen & layout", "Audio"),
                     headings.map { it.text.toString() })
                 val title = labels.single { it.text.toString() == "Audio codec" }
                 val description = labels.single { it.text.startsWith("RAW (uncompressed PCM)") }
@@ -618,17 +589,11 @@ class CaptureSettingsDeviceTest {
                 assertTrue(headings.first().textSize > title.textSize)
                 assertNotEquals(title.currentTextColor, description.currentTextColor)
                 assertEquals(R.id.audio_codec, title.labelFor)
-                val advanced = dialog.findViewById<View>(R.id.capture_settings_advanced)
-                assertEquals(View.GONE, advanced.visibility)
-                val toggle = dialog.findViewById<Button>(R.id.capture_settings_toggle_advanced)
-                toggle.performClick()
-                assertEquals(View.VISIBLE, advanced.visibility)
-                assertEquals("Expanded", toggle.stateDescription)
-                toggle.performClick()
-                assertEquals(View.GONE, advanced.visibility)
+                assertFalse(labels.any { it.text.contains("advanced", ignoreCase = true) ||
+                    it.text.contains("Typed numeric") || it.text.toString() == "Available displays and encoders" })
                 val enabled = dialog.findViewById<CheckBox>(R.id.capture_audio_enabled)
                 val audioViews = listOf(R.id.audio_codec, R.id.audio_encoder, R.id.audio_bitrate,
-                    R.id.capture_audio_source, R.id.capture_audio_options).map { dialog.findViewById<View>(it) }
+                    R.id.capture_audio_source).map { dialog.findViewById<View>(it) }
                 assertTrue(audioViews.all { it.isEnabled })
                 val before = editor!!.save()
                 enabled.isChecked = false
@@ -645,14 +610,14 @@ class CaptureSettingsDeviceTest {
         }
     }
 
-    @Test fun advancedOptionsRetainDraftStateAndRevealValidationErrors() {
+    @Test fun savedCodecTuningSurvivesApplyAndRecreationUntilExplicitReset() {
         assumeTrue("Do not interfere with an active session", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val name = "settings-advanced-test-${UUID.randomUUID()}"
         val preferences = context.getSharedPreferences(name, 0)
         val store = CaptureSettingsStore(preferences)
-        store.write(Settings().apply { videoOptions = "profile=1" })
+        store.write(Settings().apply { videoOptions = "profile=1"; audioCodec = "aac"; audioOptions = "aac-profile=2" })
         val saved = preferences.getString("capture", null)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -663,28 +628,148 @@ class CaptureSettingsDeviceTest {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store, proof, { false }, {})
                 dialog = editor!!.show()
-                assertEquals(View.VISIBLE, dialog.findViewById<View>(R.id.capture_settings_advanced).visibility)
-                dialog.findViewById<EditText>(R.id.capture_video_options).setText("max-bframes=1")
-                dialog.findViewById<Button>(R.id.capture_settings_toggle_advanced).performClick()
+                assertFalse(allText(checkNotNull(dialog.window).decorView).any { it.text.toString() == "Advanced" })
                 val draft = editor!!.save()
+                assertEquals("profile=1", draft.getString("videoOptions"))
+                assertEquals("aac-profile=2", draft.getString("audioOptions"))
+                assertFalse(draft.containsKey("advancedExpanded"))
                 editor!!.dismiss()
                 editor = CaptureSettingsEditor(activity, store, proof, { false }, {}).apply { restore(draft) }
                 dialog = editor!!.show()
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                assertEquals(View.GONE, dialog.findViewById<View>(R.id.capture_settings_advanced).visibility)
-                assertEquals("max-bframes=1", dialog.findViewById<EditText>(R.id.capture_video_options).text.toString())
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                assertTrue(editor!!.showing)
-                assertEquals(View.VISIBLE, dialog.findViewById<View>(R.id.capture_settings_advanced).visibility)
-                assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.startsWith("Not saved:"))
                 assertEquals(saved, preferences.getString("capture", null))
-                dialog.findViewById<EditText>(R.id.capture_video_options).setText("profile=1")
-                dialog.findViewById<Button>(R.id.capture_settings_toggle_advanced).performClick()
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 assertFalse(editor!!.showing)
                 assertEquals("profile=1", store.read().videoOptions)
+                assertEquals("aac-profile=2", store.read().audioOptions)
+                dialog = editor!!.show()
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+                assertEquals(saved, preferences.getString("capture", null))
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(editor!!.showing)
+                assertEquals("", store.read().videoOptions)
+                assertEquals("", store.read().audioOptions)
+            }
+        } finally {
+            instrumentation.runOnMainSync { editor?.dismiss(); activity.finish() }
+            assertTrue(context.deleteSharedPreferences(name))
+        }
+    }
+
+    @Test fun invalidLegacyCodecTuningOffersExplicitResetWithoutSilentRewrite() {
+        assumeTrue("Do not interfere with an active session", !CastService.active)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val name = "settings-legacy-tuning-test-${UUID.randomUUID()}"
+        val preferences = context.getSharedPreferences(name, 0)
+        val store = CaptureSettingsStore(preferences)
+        val saved = Settings().apply { videoOptions = "max-bframes=1" }.request().toString()
+        assertTrue(preferences.edit().putString("capture", saved).commit())
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        var editor: CaptureSettingsEditor? = null
+        try {
+            instrumentation.runOnMainSync {
+                editor = CaptureSettingsEditor(activity, store,
+                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                val dialog = editor!!.show()
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertTrue(editor!!.showing)
+                assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.contains("Reset defaults"))
+                assertEquals(saved, preferences.getString("capture", null))
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+                assertEquals(saved, preferences.getString("capture", null))
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(editor!!.showing)
+                assertEquals("", store.read().videoOptions)
+            }
+        } finally {
+            instrumentation.runOnMainSync { editor?.dismiss(); activity.finish() }
+            assertTrue(context.deleteSharedPreferences(name))
+        }
+    }
+
+    @Test fun maximumFpsOffersCommonRatesUpTo120AndPersistsDraftSelection() {
+        assumeTrue("Do not interfere with an active session", !CastService.active)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val name = "settings-fps-test-${UUID.randomUUID()}"
+        val preferences = context.getSharedPreferences(name, 0)
+        val store = CaptureSettingsStore(preferences)
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        var editor: CaptureSettingsEditor? = null
+        try {
+            instrumentation.runOnMainSync {
+                editor = CaptureSettingsEditor(activity, store, proof, { false }, {})
+                var dialog = editor!!.show()
+                val fps = dialog.findViewById<Spinner>(R.id.maximum_fps)
+                val expected = listOf(15, 24, 25, 30, 48, 50, 60, 90, 120)
+                assertEquals(expected.map { "$it FPS" }, (0 until fps.count).map { fps.getItemAtPosition(it).toString() })
+                assertEquals("60 FPS", fps.selectedItem.toString())
+                fps.setSelection(fps.count - 1)
+                val draft = editor!!.save()
+                assertEquals("120", draft.getString("maxFps"))
+                editor!!.dismiss()
+                editor = CaptureSettingsEditor(activity, store, proof, { false }, {}).apply { restore(draft) }
+                dialog = editor!!.show()
+                assertEquals("120 FPS", dialog.findViewById<Spinner>(R.id.maximum_fps).selectedItem.toString())
+                assertEquals(60, store.read().maxFps)
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(editor!!.showing)
+                assertEquals(120, store.read().maxFps)
+                dialog = editor!!.show()
+                assertEquals("120 FPS", dialog.findViewById<Spinner>(R.id.maximum_fps).selectedItem.toString())
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+                assertEquals("60 FPS", dialog.findViewById<Spinner>(R.id.maximum_fps).selectedItem.toString())
+                assertEquals(120, store.read().maxFps)
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertEquals(60, store.read().maxFps)
+            }
+        } finally {
+            instrumentation.runOnMainSync { editor?.dismiss(); activity.finish() }
+            assertTrue(context.deleteSharedPreferences(name))
+        }
+    }
+
+    @Test fun legacyMaximumFpsRequiresExplicitChoiceWithoutSilentClamping() {
+        assumeTrue("Do not interfere with an active session", !CastService.active)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val name = "settings-legacy-fps-test-${UUID.randomUUID()}"
+        val preferences = context.getSharedPreferences(name, 0)
+        val store = CaptureSettingsStore(preferences)
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        var editor: CaptureSettingsEditor? = null
+        try {
+            for (legacy in listOf(45, 144)) {
+                store.write(Settings().apply { maxFps = legacy })
+                val saved = preferences.getString("capture", null)
+                instrumentation.runOnMainSync {
+                    editor = CaptureSettingsEditor(activity, store, proof, { false }, {})
+                    var dialog = editor!!.show()
+                    var fps = dialog.findViewById<Spinner>(R.id.maximum_fps)
+                    assertTrue(fps.selectedItem.toString().startsWith("Unavailable saved rate: $legacy FPS"))
+                    assertFalse((fps.adapter as android.widget.ListAdapter).isEnabled(fps.selectedItemPosition))
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                    assertTrue(editor!!.showing)
+                    assertEquals(saved, preferences.getString("capture", null))
+                    val draft = editor!!.save()
+                    editor!!.dismiss()
+                    editor = CaptureSettingsEditor(activity, store, proof, { false }, {}).apply { restore(draft) }
+                    dialog = editor!!.show()
+                    fps = dialog.findViewById(R.id.maximum_fps)
+                    assertTrue(fps.selectedItem.toString().startsWith("Unavailable saved rate: $legacy FPS"))
+                    fps.setSelection((0 until fps.count).single { fps.getItemAtPosition(it).toString() == "90 FPS" })
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                    assertFalse(editor!!.showing)
+                    assertEquals(90, store.read().maxFps)
+                }
             }
         } finally {
             instrumentation.runOnMainSync { editor?.dismiss(); activity.finish() }
