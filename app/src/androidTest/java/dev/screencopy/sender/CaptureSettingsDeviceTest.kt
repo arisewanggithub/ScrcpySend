@@ -61,7 +61,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, CaptureSettingsStore(preferences),
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) },
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) },
                     { false }, {})
                 dialog = editor!!.show()
                 scroll = dialog.findViewById(R.id.capture_settings_scroll)
@@ -179,7 +179,7 @@ class CaptureSettingsDeviceTest {
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         fun newEditor() = CaptureSettingsEditor(activity, store,
-            { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+            { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
         var editor: CaptureSettingsEditor? = null
         var dialog: AlertDialog? = null
         try {
@@ -232,7 +232,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
                 val dialog = editor!!.show()
                 assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("unavailable"))
                 assertTrue(dialog.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("Apply to use Custom TCP"))
@@ -241,7 +241,7 @@ class CaptureSettingsDeviceTest {
                 val draft = editor!!.save()
                 editor!!.dismiss()
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
                     .apply { restore(draft) }
                 val reopened = editor!!.show()
                 assertTrue(reopened.findViewById<TextView>(R.id.capture_settings_notice).text.toString().contains("Apply to use Custom TCP"))
@@ -279,7 +279,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = inventory.report() + "\n" + fixtureHardware()) },
+                    { ProjectionInventory.Snapshot(capabilities = inventory.report() + "\n" + fixtureHardware()) },
                     { active }, {}, { response = it })
                 dialog = editor!!.show()
                 val displays = dialog!!.findViewById<Spinner>(R.id.capture_display)
@@ -342,7 +342,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = metadata.report() + "\n" + fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = metadata.report() + "\n" + fixtureDisplays()) }, { false }, {})
                 dialog = editor!!.show()
                 val opusRates = dialog!!.findViewById<Spinner>(R.id.audio_bitrate)
                 assertEquals(1, (0 until opusRates.count).count { opusRates.getItemAtPosition(it).toString().contains("recommended") })
@@ -400,7 +400,7 @@ class CaptureSettingsDeviceTest {
         val saved = preferences.getString("capture", null)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        val proof = { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }
         var editor: CaptureSettingsEditor? = null
         lateinit var dialog: AlertDialog
         fun codecNames(): List<String> = dialog.findViewById<Spinner>(R.id.audio_codec).let { codec ->
@@ -469,7 +469,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, CaptureSettingsStore(preferences),
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
                 dialog = editor!!.show()
             }
             instrumentation.waitForIdleSync()
@@ -509,7 +509,7 @@ class CaptureSettingsDeviceTest {
             instrumentation.runOnMainSync {
                 var active = false
                 val store = CaptureSettingsStore(preferences)
-                val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+                val proof = { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }
                 var applied = 0
                 var appliedSummary = HomeCaptureSettings.summary(store.read())
                 val onApplied = {
@@ -573,7 +573,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
                 dialog = editor!!.show()
             }
             instrumentation.waitForIdleSync()
@@ -621,7 +621,7 @@ class CaptureSettingsDeviceTest {
         val saved = preferences.getString("capture", null)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        val proof = { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }
         var editor: CaptureSettingsEditor? = null
         lateinit var dialog: AlertDialog
         try {
@@ -673,7 +673,7 @@ class CaptureSettingsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }, { false }, {})
+                    { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }, { false }, {})
                 val dialog = editor!!.show()
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 assertTrue(editor!!.showing)
@@ -700,7 +700,7 @@ class CaptureSettingsDeviceTest {
         val store = CaptureSettingsStore(preferences)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        val proof = { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }
         var editor: CaptureSettingsEditor? = null
         try {
             instrumentation.runOnMainSync {
@@ -744,7 +744,7 @@ class CaptureSettingsDeviceTest {
         val store = CaptureSettingsStore(preferences)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val proof = { ShizukuSetup.Snapshot(state = ShizukuState.READY, capabilities = fixtureDisplays()) }
+        val proof = { ProjectionInventory.Snapshot(capabilities = fixtureDisplays()) }
         var editor: CaptureSettingsEditor? = null
         try {
             for (legacy in listOf(45, 144)) {

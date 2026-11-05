@@ -1,6 +1,5 @@
 package dev.screencopy.sender
 
-import io.github.muntashirakon.adb.AdbInputStream
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -12,13 +11,7 @@ import java.io.IOException
 import java.nio.file.Path
 
 class BackendTest {
-    @Test fun adbInputStreamPreservesUnsignedBinaryBytes() {
-        val input = object : AdbInputStream(null) {
-            override fun read(buffer: ByteArray): Int { buffer[0] = 0x80.toByte(); return 1 }
-        }
-        assertEquals(128, input.read())
-    }
-    @Test fun defaultsPersistExactlyAndShellArgumentsAreStructured() {
+    @Test fun defaultsPersistExactlyAndInvalidCodecOptionsFail() {
         val settings = Settings()
         assertTrue(settings.audio); assertEquals("raw", settings.audioCodec)
         assertEquals(192000, settings.audioBitrate); assertEquals("h264", settings.videoCodec)
@@ -27,18 +20,6 @@ class BackendTest {
         settings.videoEncoder = "c2.android.avc.encoder"; settings.videoOptions = "profile=1,level:int=4"
         val restored = Settings.from(settings.request())
         assertEquals(settings.request().toString(), restored.request().toString())
-        val args = CaptureBackend.options(restored, "00000001")
-        for (expected in listOf(" audio_codec=raw", " crop=400:600:10:20", " capture_orientation=@90",
-            " downsize_on_error=false", " control=true", " power_on=false", " clipboard_autosync=false", "max-bframes=0")) assertTrue(args.contains(expected))
-        val guardian = CaptureGuardian.arguments(settings, "00000001", "/data/local/tmp/screencopy-00000001.jar")
-        assertEquals("/data/local/tmp/screencopy-00000001.jar.supervisor", guardian.first())
-        assertEquals(CaptureBackend.VERSION, guardian[2])
-        assertTrue(guardian.contains("audio_codec=raw"))
-        assertFalse(guardian.any { it.startsWith("audio_bit_rate=") || it.startsWith("audio_encoder=") ||
-            it.startsWith("audio_codec_options=") })
-        assertFalse(guardian.any { it.contains("kill ") || it == "sh" })
-        assertEquals(6, CaptureGuardian.artifacts("/data/local/tmp/screencopy-00000001.jar", "00000001").size)
-        assertThrows(IllegalArgumentException::class.java) { CaptureGuardian.arguments(settings, "00000001", "/unowned/file") }
         for (invalid in listOf("profile=1;id", "max-bframes=1", "profile:float=1.5,profile:int=2")) {
             settings.videoOptions = invalid
             assertThrows(IllegalArgumentException::class.java) { settings.validate() }

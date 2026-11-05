@@ -1,101 +1,132 @@
 # ScrcpySend architecture
 
-ScrcpySend captures Android screen/audio through a permission-gated Shizuku
-service and sends it to ScrcpyRecv on a trusted LAN. Application ID
-`dev.screencopy.sender` and `SCPY` framing are stable compatibility identifiers.
-Wire protocol version 3 is separate from app release versions.
-Exact schemas/limits are in [PROTOCOL.md](PROTOCOL.md);
-setup, build profiles and release gates are in [README.md](README.md).
-
-## Trust and endpoint ownership
-
-Discovery, control and media are unauthenticated and unencrypted.
-Receiver names are labels: actual UDP-source IP plus advertised TCP
-port identifies the selected endpoint. Discovery refreshes names/availability,
-expires idle rows and resets after network changes. Matching names cannot
-redirect an active request. Trusted private LAN access is required.
-
-One positive session ID owns the accepted cast. The active row remains pinned
-and actionable through BUSY advertisements and discovery expiry until its own
-cleanup finishes. A service-adopted request lease prevents late Activity,
-discovery or previous-session callbacks from retiring another request.
-Acceptance precedes capture; unsupported transport/configuration requests fail
-without silent quality, codec, audio or preference changes.
+The Android sender uses public MediaProjection/MediaCodec/AudioRecord APIs and
+Custom TCP wire protocol version 3. Application ID `dev.screencopy.sender` and
+`SCPY` framing remain stable. See [PROTOCOL.md](PROTOCOL.md) for wire schemas.
 
 ## Capture boundary
 
 ```text
-Activity / applied immutable request
-  -> Shizuku Binder + explicit permission / identity verification
-  -> non-daemon UserService / owned read-only artifact FDs
-  -> checksum-pinned scrcpy-server3.3.4 + native supervisor
-  -> owned video/audio FDs
-  -> Custom TCP sink
+Play / immutable receiver request
+  -> optional RECORD_AUDIO runtime permission
+  -> Android MediaProjection consent (one token per session)
+  -> foreground CastService with mediaProjection [+ microphone] type
+  -> public encoder/display inventory and receiver SESSION_ACCEPT
+  -> VirtualDisplay -> MediaCodec input Surface -> encoded video packets
+  -> optional AudioPlaybackCapture / microphone AudioRecord -> PCM or MediaCodec
+  -> bounded Custom TCP queues -> receiver
 ```
 
-Shizuku API/provider13.1.5 provides generated AIDL and a protected provider.
-The service verifies actual shell UID2000; root UID0 requires explicit consent.
-Unknown/ordinary UIDs fail. Readiness includes deployment integrity,
-encoder/display listing and owned cleanup, not merely a permission check.
-Structured validated settings are not arbitrary shell command text.
+No shell service, ADB connection, Shizuku Binder, native supervisor or scrcpy
+server participates. Their dependencies, archives, build tasks and runtime
+permissions are removed. ADB remains a developer deployment/test tool only.
 
-The first-party single-threaded native supervisor retains kernel child/wait
-ownership until termination/reap. Teardown affects only owned resources, not
-unrelated processes. The app and service close their respective media FD
-copies even if the Binder peer dies.
+Projection consent is transient and never persisted. Activity results are
+checked against the current request token. Cancel/deny/stale results cannot
+start another request. The service enters foreground before consuming consent.
+An Activity recreation preserves only the pending request identity, not a
+reusable projection grant. Process loss requires a fresh Play.
 
-A private lifecycle socket uses the pinned backend's control EOF completion
-mechanism. It carries no input/clipboard/power messages and is never exposed
-as a LAN control channel or Binder media track. Media remains video/audio only.
-Large payloads travel through FDs, not Binder transactions.
+`ProjectionOwner` registers the mandatory callback before creating its one
+VirtualDisplay. Size switches detach the old Surface, clean up readers and
+codecs, negotiate a new wire session, and resize/reattach the same display.
+The token is never passed twice to getMediaProjection/createVirtualDisplay.
+Final Stop, error, service destruction, or Android revocation ends capture.
 
-## Custom TCP transport
+## Video/audio
 
-The sender uses wire protocol version 3 bounded framing, explicit stream configuration
-and readiness, internal session/track generations and negotiated codec metadata.
-Unavailable saved transports require explicit correction in Settings.
+Only public codec metadata is queried before capture. Video encoders must be
+hardware-accelerated; geometry, rate, bitrate and saved explicit encoder choices
+remain authoritative. The legacy untransformed path has no application pixel-copy
+step: the VirtualDisplay writes to the encoder Surface. Negotiated fixed-natural
+video uses a GPU transform even without a crop, never CPU pixel readback.
+Before sharing consent, validation checks settings, eligible encoders, bitrates
+and natural display/crop bounds without assuming a receiver coordinate mode.
+Encoder size/rate validation runs after HELLO selects legacy or fixed-natural
+geometry and again before capture. Runtime size switches use the active capture's
+negotiated mode, not a legacy default.
 
-ScrcpyRecv validates real decoder support and track readiness. Source settings,
-packet boundaries, canonical OpusHead and original payload order remain
-authoritative. Requested audio is not silently disabled and no hidden recrop,
-codec substitution or capture retry is performed.
+Nonzero crop/orientation uses a bounded GPU-only SurfaceTexture/EGL path.
+Coordinates are mapped from natural-display bounds through current rotation.
+Quarter-turn mapping follows Android's physical-to-logical convention: display
+rotation 90 maps normalized `(u,v)` to `(v,1-u)`, while 270 maps to `(1-v,u)`.
+Clockwise encoded/manual presentation compensation uses the opposite sign.
+Asymmetric off-center crop tests verify both the sampled region and corner order.
+Projection resize callbacks and public DisplayManager events (including Android
+11-13 and rotations that do not change dimensions) are applied by the video worker.
+When both HELLO peers negotiate `videoRotation`, video always uses the GPU path
+to map the current display back into the fixed natural-coordinate crop/raster.
+Display rotation changes only the source texture mapping and per-picture
+presentation metadata, never encoder dimensions or codec generation. GPU frame
+timestamps associate rotation with encoder output, including repeated frames;
+manual orientation overrides are expressed by the metadata. Video pixels remain
+on the GPU. Older receivers keep the existing orientation-following path.
 
-## Lifecycle and UI
+On that legacy path, if output dimensions
+change, it first waits for the previous video generation's readiness and queued/
+in-progress writes to drain, then detaches the old Surface and releases/reconfigures only the video encoder
+and optional renderer, then reattaches to the same VirtualDisplay. The next real
+codec initialization announces a new generation, even for identical CSD after
+restart. This keeps restart timestamp gaps from spanning old queued media without
+changing the 500 ms whole-track PTS-span limit or discarding packets. The restart
+barrier is interruptible, stops on session termination and fails explicitly after
+the existing ten-second readiness budget. Audio continues independently. Resize
+notifications received during the wait are coalesced, and the wait does not hold
+the capture lifecycle lock. Audio timestamps/ownership remain active. Locked orientation
+can keep output dimensions fixed while the renderer updates source coordinates.
+Public real-display dimensions avoid stale Activity WindowMetrics rotation.
+Renderer callbacks and cleanup use an owned GL thread; failures are explicit.
 
-Play freezes applied settings and adopts a request lease. The foreground
-service owns connecting/playing/stopping state; an Activity observes current
-service state rather than a saved "playing" preference. Settings stay disabled
-through startup, playback and teardown. A detached UI callback cannot clear
-service-owned state or act on a newer receiver.
+AudioRecord captures stereo PCM at 48 kHz. Playback uses eligible app audio
+under Android's capture policies; microphone mode uses the microphone source
+and corresponding foreground-service type. Legacy output is explicitly treated
+as restricted playback, not privileged mixed output. Excluded playback may
+produce silence; no bypass or silent switch to microphone exists. A projection-
+owned media-stream mute suppresses local playback only for playback/output
+capture. It survives size-switch restarts and restores on final cleanup or
+revocation. A persisted ownership marker supports recovery on the next launch
+after process death without changing the saved volume index.
 
-Stop, permission loss, network failure or backend termination retires only
-matching resources. Capture resources and the TCP connection are closed and
-workers are joined with bounded ownership-aware cleanup.
-The first terminal outcome wins over late teardown failures. Retry is explicit
-and only becomes available after cleanup.
+RAW audio is sent unchanged. Encoded audio uses the requested compatible encoder.
+Small nonblocking PCM reads accumulate into fixed 20 ms packets; no resampling
+or sample dropping is introduced. Wire writes combine the 40-byte header with
+up to 16 KiB of payload, and send any large remainder directly. This bounds
+copying while avoiding dozens of tiny writes on TCP_NODELAY connections.
+Android Opus initialization is converted to the receiver's canonical OpusHead;
+AAC uses actual AAC-LC configuration. Video CSD, key flags, FIFO payloads and
+encoder PTS remain authentic. Audio input uses the monotonic capture timestamp
+when available, otherwise a recording-start monotonic anchor plus sample count.
+The receiver continues to own playback timing.
 
-The runtime full-screen/saved-size choice does not rewrite saved settings.
-Changing its effective request explicitly authorizes owned Stop followed by
-new Play after receiver acknowledgement and successful cleanup. Cancellation
-or failure prevents automatic retry. Visible screen-on and notification actions
-use the same request lease and ordinary Android permission/lifecycle rules.
+## Ownership and transport
 
-## Updates, licensing and verification
+The immutable request and service lease prevent late Activity callbacks or old
+workers from retiring a new request. Only one receiver is active. Explicit
+SESSION_ACCEPT precedes frame production; STREAM_CONFIG/STREAM_READY precede
+media on each track. Queue bounds and congestion errors are unchanged.
+Sender heartbeat probes are scheduled every two seconds independently of media
+queue occupancy, so continuous PCM/video cannot starve bidirectional liveness.
 
-[UPDATES.md](UPDATES.md) defines the independent HTTPS stable-release updater,
-single-signer/hash/package validation, scoped FileProvider and explicit
-permission/install/retry actions. Checking/downloading never stops capture,
-and installation is guarded by final idle-cast checks.
+Stop detaches projection output, closes the optional GL path, stops AudioRecord,
+joins workers, and releases encoders/Surfaces before the next capture can start.
+Cleanup errors are not treated as successful size-switch authorization.
+The projection callback reports revocation through the same first-failure
+path. Notification Stop remains available independently of Activity lifetime.
 
-CI validates the app and selects only the remote-update UI class
-on a disposable API35 emulator. It does not run real screen capture/H.265 Stop
-or claim hardware acceptance. H.265 capture/Stop/recast safety remains
-unverified because kernel-panic risk has been reported; synthetic tests do
-not resolve it. Hardware codec support, rotation, audio routes, latency and
-endurance require measurements.
+Discovery/control/media remain unauthenticated and unencrypted. Pin to the
+actual UDP-source IP and port on a trusted LAN. Names are not identities.
+No saved receiver trust, remote input, hidden fallback or automatic reconnect
+is introduced.
 
-Original application code has no selected reuse grant. Preserve existing
-copyright and third-party licenses/source materials. Binary publication requires
-manual distribution approval and signing; passing tests is not legal approval.
-See [THIRD_PARTY.md](THIRD_PARTY.md), including LGPL corresponding application
-sources/build scripts and relinking/recombination obligations.
+## Verification
+
+JVM tests cover framing, codec initialization, raw/encoded packets, coordinate
+transforms, ownership, cancellation and bounded queues. UI tests use synthetic
+metadata without starting capture. An explicit manual-consent H.264 device test
+exercises the real service, projection, receiver-side decode, playback PCM and
+Stop. Do not select real H.265 screen capture/Stop in automated acceptance.
+
+Release CI uses an isolated self-instrumenting harness and disposable API35
+emulator to check real optimized resources, manifest, public API availability
+and absence of old server/native assets. It does not claim capture consent,
+codec performance or hardware safety. See [UPDATES.md](UPDATES.md).

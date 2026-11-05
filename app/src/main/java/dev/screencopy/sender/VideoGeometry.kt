@@ -10,17 +10,19 @@ internal data class VideoGeometry(val requested: VideoSize, val output: VideoSiz
     fun description() = "Requested capture $requested, max size $maxSize (scrcpy $normalizedMaxSize); encoded output $output at up to $fps fps."
 }
 internal object ScrcpyVideoSizing {
-    fun calculate(settings: Settings, inventory: DisplayInventory): VideoGeometry {
+    fun calculate(settings: Settings, inventory: DisplayInventory, natural: Boolean = false): VideoGeometry {
         settings.validate(); inventory.validate(settings)
         val display = inventory.displays.single { it.id == settings.displayId }
         val rotation = display.rotation ?: throw IOException("UNSUPPORTED_CONFIG: Refresh display rotation metadata before checking video size.")
-        var size = VideoSize(display.width, display.height)
+        var size = if (natural) VideoSize(display.naturalWidth, display.naturalHeight) else VideoSize(display.width, display.height)
         if (settings.cropWidth > 0) {
             size = VideoSize(settings.cropWidth, settings.cropHeight)
-            if (rotation % 2 != 0) size = size.rotated()
+            if (!natural && rotation % 2 != 0) size = size.rotated()
         }
-        if (settings.orientation.startsWith("@") && rotation % 2 != 0) size = size.rotated()
-        if (settings.orientation.removePrefix("@").toInt() in setOf(90, 270)) size = size.rotated()
+        if (!natural) {
+            if (settings.orientation.startsWith("@") && rotation % 2 != 0) size = size.rotated()
+            if (settings.orientation.removePrefix("@").toInt() in setOf(90, 270)) size = size.rotated()
+        }
         val requested = size
         val max = settings.maxSize and -8
         if (settings.maxSize in 1..7) throw IOException("UNSUPPORTED_CONFIG: Max size ${settings.maxSize} becomes 0 (unlimited) in scrcpy. Choose 0 explicitly or at least 8.")
@@ -114,7 +116,7 @@ internal object VideoGeometryValidation {
         val considered = if (automatic) automaticFirstAttempts.map { checks[it] } else checks
         if (considered.isEmpty() || considered.any { it.limits == null || it.sizeSupported == null || it.rateSupported == null })
             throw VideoGeometryException(geometry, VideoGeometryReason.METADATA_UNAVAILABLE,
-                "Video size/rate metadata unavailable. Refresh Shizuku capabilities or explicitly choose an encoder with available metadata.")
+                "Video size/rate metadata unavailable. Refresh capture capabilities or explicitly choose an encoder with available metadata.")
         val supported = considered.count { it.sizeSupported == true && it.rateSupported == true }
         if (supported == considered.size) return
         val reason = if (automatic && supported > 0) VideoGeometryReason.AUTO_NOT_FIXED

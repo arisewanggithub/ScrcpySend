@@ -27,7 +27,7 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class ReceiverRowsDeviceTest {
     @Test fun freshDecodedAdvertisementRendersIdleHomeRowWithoutStartingCapture() {
-        assumeTrue("Designated idle test app only", !CastService.active && !ShizukuSetup.shared.snapshot().ready)
+        assumeTrue("Designated idle test app only", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val model = ReceiverCasting.shared
         assumeTrue(model.snapshot().active == null)
@@ -36,6 +36,14 @@ class ReceiverRowsDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 assertEquals(Looper.getMainLooper(), Looper.myLooper())
+                fun headings(view: View): List<String> =
+                    (if (view is TextView && view.isAccessibilityHeading) listOf(view.text.toString()) else emptyList()) +
+                        (if (view is android.view.ViewGroup) (0 until view.childCount).flatMap { headings(view.getChildAt(it)) }
+                        else emptyList())
+                val homeHeadings = headings(checkNotNull(activity.window).decorView)
+                assertFalse(homeHeadings.contains("Screen sharing"))
+                assertFalse(homeHeadings.contains("Shizuku setup"))
+                assertTrue(homeHeadings.contains("Receivers"))
                 val bytes = """{"protocol":"screencopy","version":3,"name":"UI fixture","port":27184,"state":"available"}""".toByteArray()
                 val receiver = Discovery.decode(bytes, "192.0.2.1", System.nanoTime())
                 model.updateDiscovery(listOf(receiver))
@@ -56,7 +64,7 @@ class ReceiverRowsDeviceTest {
     }
 
     @Test fun activeServiceRecreationRendersStopDisablesSettingsAndScopesKeepScreenOnToVisibleWindow() {
-        assumeTrue("Designated idle test app only", !CastService.active && !ShizukuSetup.shared.snapshot().ready)
+        assumeTrue("Designated idle test app only", !CastService.active)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val model = ReceiverCasting.shared
         val state = CastingServiceState(model)

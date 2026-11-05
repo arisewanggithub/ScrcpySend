@@ -5,16 +5,14 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.EOFException
-import io.github.muntashirakon.adb.AdbStream
 
 /** Exact scrcpy 3.3.4 Streamer/DesktopConnection framing, never a generic header stripper. */
 object ScrcpyAdapter {
     interface Sink {
         fun config(track: Int, generation: Int, config: JSONObject)
         fun packet(packet: Wire.Message)
-    }
-    fun readStream(stream: AdbStream, track: Int, settings: Settings, session: Long, sink: Sink) {
-        read(stream.openInputStream(), track, settings, session, sink) { stream.setReadTimeoutMillis(0) }
+        // Synchronous sinks have no queued video; buffered sinks wait before encoder replacement.
+        fun awaitVideoDrain() {}
     }
     fun read(source: InputStream, track: Int, settings: Settings, session: Long, sink: Sink, initialized: () -> Unit = {}) {
         val progress = CaptureReadProgress(track, if (track == 1) settings.videoCodec else settings.audioCodec)

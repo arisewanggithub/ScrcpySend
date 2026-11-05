@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Unencrypted, unauthenticated trusted-LAN endpoint transport. */
 class ReceiverLink(private val target: ReceiverTarget) : Closeable {
     private val socket = Socket()
+    var videoRotation: Boolean = false
+        private set
 
     fun connect(timeoutMillis: Long = 10_000) {
         require(timeoutMillis > 0) { "Startup deadline must be positive" }
@@ -26,7 +28,7 @@ class ReceiverLink(private val target: ReceiverTarget) : Closeable {
             socket.connect(InetSocketAddress(target.host, target.port), 10000)
             send(Wire.control(Wire.HELLO, 0, Wire.obj(
                 "role" to "sender", "versions" to JSONArray().put(Wire.VERSION),
-                "name" to "ScrcpySend"
+                "name" to "ScrcpySend", "videoRotation" to true
             )))
             val hello = receive()
             if (hello.session != 0L) throw IOException("PROTOCOL: wrong HELLO session")
@@ -40,6 +42,9 @@ class ReceiverLink(private val target: ReceiverTarget) : Closeable {
             val versions = json.getJSONArray("versions")
             if ((0 until versions.length()).none { versions.get(it) is Int && versions.getInt(it) == Wire.VERSION })
                 throw IOException("VERSION: receiver must support wire protocol version 3 over plain TCP")
+            if (json.has("videoRotation") && json.opt("videoRotation") !is Boolean)
+                throw IOException("PROTOCOL: videoRotation must be boolean")
+            videoRotation = json.opt("videoRotation") == true
             if (expired.get()) throw SocketTimeoutException("TIMEOUT: receiver startup exceeded its phase deadline")
             success = true
         } catch (e: IOException) {

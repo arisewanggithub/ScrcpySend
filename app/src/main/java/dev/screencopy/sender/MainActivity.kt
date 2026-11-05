@@ -3,12 +3,12 @@ package dev.screencopy.sender
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.text.TextUtils
@@ -22,85 +22,41 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import rikka.shizuku.Shizuku
 
 class MainActivity : Activity() {
     private lateinit var ui: SenderUi
     private lateinit var updates: dev.scrcpy.update.UpdateUi
     private lateinit var root: LinearLayout
-    private lateinit var setupPanel: LinearLayout
-    private lateinit var mainPanel: LinearLayout
     private lateinit var receiverRows: LinearLayout
     private lateinit var empty: TextView
     private lateinit var info: TextView
     private lateinit var statusPanel: LinearLayout
-    private lateinit var connectionNotice: TextView
-    private lateinit var setupInstructions: TextView
-    private lateinit var connectButton: Button
-    private lateinit var cancelConnection: Button
-    private lateinit var permissionButton: Button
-    private lateinit var openShizukuButton: Button
-    private lateinit var installShizukuButton: Button
-    private lateinit var helpButton: Button
     private lateinit var settingsButton: Button
     private lateinit var installedVersion: TextView
     private lateinit var retryDiscovery: Button
-    private lateinit var rootConsent: CheckBox
     private lateinit var ignoreSizeAndCrop: CheckBox
     private lateinit var appliedSettings: TextView
     private lateinit var appliedSettingsHeading: TextView
     private lateinit var sizeNotice: TextView
-    private var renderingSize = false
-    private lateinit var autoConnect: ShizukuAutoConnect
     private lateinit var settings: CaptureSettingsStore
     private lateinit var editor: CaptureSettingsEditor
     private lateinit var rowActions: ReceiverRowActions
-    private val setup = ShizukuSetup.shared
     private val casting = ReceiverCasting.shared
-    private var readiness = setup.snapshot()
-    private var availability = ShizukuState.STOPPED
-    private var accessError: String? = null
-    private var permissionTicket: Long? = null
+    private var readiness: ProjectionInventory.Snapshot? = null
+    private var pendingConsent: Long? = null
+    private var renderingSize = false
     private var visible = false
     private var discovery: Discovery? = null
     private var discoveryEpoch = 0L
-    private val discoveryTrace = DiscoveryLifecycleTrace { android.util.Log.i("ScreenCopySender", it) }
     private var reopenSettings = false
     private var shownError = ""
-    private var shownRequest: Long? = null
-
-    private val permissionResult = Shizuku.OnRequestPermissionResultListener { request, grant ->
-        if (request == 4201) runOnUiThread {
-            if (grant == PackageManager.PERMISSION_GRANTED) permissionTicket?.let { autoConnect.permissionGranted(it) }
-            else if (permissionTicket?.let(autoConnect::permissionDenied) == true) {
-                setup.accessUnavailable("Shizuku permission denied or revoked.")
-                show("Allow ScrcpySend in Shizuku, then retry.")
-            }
-            reconcileShizuku()
-        }
-    }
-    private val binderReceived = Shizuku.OnBinderReceivedListener { runOnUiThread { if (visible) reconcileShizuku() } }
-    private val setupObserver: (ShizukuSetup.Snapshot) -> Unit = {
-        runOnUiThread {
-            if (visible) {
-                readiness = setup.snapshot() // Never replay an obsolete queued proof.
-                render()
-                reconcileShizuku()
-            }
-        }
-    }
     private val listBinding by lazy {
-        ReceiverListBinding(casting, { readiness.ready }, { runOnUiThread(it) }) { current, rows ->
+        ReceiverListBinding(casting, { readiness?.ready == true }, { runOnUiThread(it) }) { current, rows ->
             if (visible) {
-                val request = current.active?.request?.token
-                if (request != null && request != shownRequest) {
-                    shownRequest = request
-                    shownError = ""
-                    if (current.error.isEmpty()) show("")
+                if (current.error.isNotEmpty() && current.error != shownError) {
+                    shownError = current.error; show(current.error)
                 }
-                if (current.error.isNotEmpty() && current.error != shownError) { shownError = current.error; show(current.error) }
                 render(current, rows)
-                reconcileShizuku()
             }
         }
     }
@@ -108,414 +64,279 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = SenderUi(this)
-        autoConnect = lastNonConfigurationInstance as? ShizukuAutoConnect
-            ?: ShizukuAutoConnect(savedInstanceState?.getBoolean("shizuku_auto_paused") ?: false)
-        permissionTicket = autoConnect.pendingPermission
+        pendingConsent = savedInstanceState?.getLong("pending_consent", -1)?.takeIf {
+            it > 0 && casting.snapshot().active?.request?.token == it
+        }
         val preferences = getSharedPreferences("settings", MODE_PRIVATE)
         if (!preferences.edit().remove("host").remove("port").remove("selectedReceiver").remove("endpoints").commit())
             throw java.io.IOException("Cannot remove obsolete receiver preferences")
         settings = CaptureSettingsStore(preferences)
-        setup.onConnectionLost = CastService::stopForReadiness
-        rowActions = ReceiverRowActions(casting, { setup.requireReady() },
-            { settings.readForEditing() },
-            { request ->
-                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 20)
-                startForegroundService(Intent(this, CastService::class.java).setAction("start").putExtra("request", request.token))
-            },
-            { request -> startService(Intent(this, CastService::class.java).setAction("stop").putExtra("request", request.token)) },
-            applyRuntimeOverride = true)
-        editor = CaptureSettingsEditor(this, settings, setup::requireReady, { CastService.active }, ::show,
-            setup::refreshDisplays, { refreshAppliedSettings() }, { updates.checkForUpdates() })
+        rowActions = ReceiverRowActions(casting, { requireReady() }, { settings.readForEditing() },
+            ::requestCapture, { request ->
+                if (pendingConsent == request.token) {
+                    pendingConsent = null
+                    casting.complete(request.token)
+                } else startService(Intent(this, CastService::class.java).setAction("stop").putExtra("request", request.token))
+            }, applyRuntimeOverride = true)
+        editor = CaptureSettingsEditor(this, settings, ::requireReady, { CastService.active }, ::show,
+            { result -> try { result(Result.success(ProjectionInventory.displays(this))) }
+                catch (e: Exception) { result(Result.failure(e)) } },
+            { refreshAppliedSettings() }, { updates.checkForUpdates() })
         editor.restore(savedInstanceState?.getBundle("settings_draft"))
         reopenSettings = savedInstanceState?.getBundle("settings_draft")?.getBoolean("open") == true
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            val pad = ui.dp(16)
-            setPadding(pad, pad, pad, pad)
+            val pad = ui.dp(16); setPadding(pad, pad, pad, pad)
         }
         val scroll = ScrollView(this).apply {
-            id = R.id.home_scroll
-            isFillViewport = true
-            addView(root)
+            id = R.id.home_scroll; isFillViewport = true; addView(root)
             setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-                insets
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
             }
         }
         setContentView(scroll)
         window.insetsController?.setSystemBarsAppearance(
             WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS)
-        val appHeading = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        root.addView(appHeading)
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        root.addView(heading)
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         ui.heading(brand, getString(R.string.app_name)).textSize = 26f
         installedVersion = text(brand, "").apply { id = R.id.home_installed_version }
-        appHeading.addView(brand,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        settingsButton = button(appHeading, "Settings") {
-            if (readiness.ready) editor.show()
+        heading.addView(brand, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        settingsButton = button(heading, "Settings") {
+            if (readiness?.ready == true) editor.show()
             else AlertDialog.Builder(this).setTitle("Settings")
                 .setItems(arrayOf("Check for updates")) { _, _ -> updates.checkForUpdates() }.show()
         }.apply { id = R.id.capture_settings }
         updates = dev.scrcpy.update.UpdateUi(this,
             dev.scrcpy.update.UpdateController.get(this, "ScrcpySend", "ScrcpySend.apk"),
-            { CastService.active || casting.snapshot().active != null })
+            { CastService.active })
         updates.restoreState(savedInstanceState?.getBundle("app_update_ui"))
-        updates.returnFocusTo(R.id.capture_settings)
         refreshVersion()
         statusPanel = card(R.id.home_status).also(root::addView)
-        val statusHeading = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
+        val statusHeading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         statusPanel.addView(statusHeading)
-        ui.heading(statusHeading, "Status").layoutParams =
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        ui.heading(statusHeading, "Status").layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         button(statusHeading, "Details") {
-            AlertDialog.Builder(this).setTitle("Session details").setMessage(info.text)
-                .setPositiveButton("OK", null).show()
+            AlertDialog.Builder(this).setTitle("Session details").setMessage(info.text).setPositiveButton("OK", null).show()
         }.id = R.id.home_status_details
         info = ui.body(statusPanel, "").apply {
-            id = R.id.home_status_message
-            maxLines = 3
-            ellipsize = TextUtils.TruncateAt.END
+            id = R.id.home_status_message; maxLines = 3; ellipsize = TextUtils.TruncateAt.END
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         statusPanel.visibility = View.GONE
-        val capturePanel = card(R.id.home_capture_settings)
+        if (!CastService.active) try { PlaybackMute.create(this).restore() }
+        catch (e: Exception) { show("Could not restore phone audio: ${safe(e)}") }
+        val receivers = card(R.id.receiver_step).also(root::addView)
+        ui.heading(receivers, "Receivers")
+        text(receivers, "Trusted family LAN only: no encryption or authentication.")
+        empty = text(receivers, "No receivers found—open Receiver on the same Wi-Fi")
+        retryDiscovery = button(receivers, "Retry") { restartDiscovery() }.apply { id = R.id.retry_receiver_discovery }
+        receiverRows = LinearLayout(this).apply { id = R.id.receiver_rows; orientation = LinearLayout.VERTICAL }
+        receivers.addView(receiverRows)
+        val capturePanel = card(R.id.home_capture_settings).also(root::addView)
         appliedSettingsHeading = ui.heading(capturePanel, "").apply { id = R.id.home_applied_settings_heading }
         appliedSettings = ui.body(capturePanel, "").apply { id = R.id.home_applied_settings }
         ignoreSizeAndCrop = CheckBox(this).apply {
-            id = R.id.home_ignore_size_crop
-            text = "Use full screen"
-            textSize = 16f
-            setTextColor(ui.primaryTextColor)
-            setTypeface(typeface, Typeface.BOLD)
-            minimumHeight = ui.dp(48)
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            setPadding(paddingLeft, ui.dp(4), paddingRight, ui.dp(4))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = ui.dp(8) }
-            isSaveEnabled = false
-            isChecked = casting.snapshot().size.requested
+            id = R.id.home_ignore_size_crop; text = "Use full screen"; textSize = 16f
+            setTextColor(ui.primaryTextColor); setTypeface(typeface, Typeface.BOLD)
+            minimumHeight = ui.dp(48); isSaveEnabled = false
             setOnCheckedChangeListener { _, checked ->
                 if (!renderingSize) {
                     val current = casting.snapshot()
                     try {
                         if (current.active == null) casting.setNextSizeOverride(checked)
-                        else if (current.size.enabled) {
-                            val token = current.active.request.token
-                            startService(SizeNotificationAction.intent(
-                                this@MainActivity, token, current.size.version, checked))
-                        }
+                        else if (current.size.enabled) startService(SizeNotificationAction.intent(
+                            this@MainActivity, current.active.request.token, current.size.version, checked))
                     } catch (e: Exception) { show("Size change unavailable: ${safe(e)}") }
                     refreshAppliedSettings()
                 }
             }
         }
         capturePanel.addView(ignoreSizeAndCrop)
-        text(capturePanel, "Ignores saved size/crop without overwriting them. Switching while casting stops and restarts the same receiver.")
-        sizeNotice = text(capturePanel, "").apply {
-            id = R.id.home_size_notice
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
+        text(capturePanel, "Ignores saved size/crop without overwriting them. Switching while casting reuses the current Android sharing session.")
+        sizeNotice = text(capturePanel, "").apply { id = R.id.home_size_notice }
         text(capturePanel, "Requested settings, not measured output. Automatic encoders are chosen before capture.")
         if (casting.snapshot().active == null) SenderFailureStore.read(this)?.let(::show)
-        setupPanel = card(R.id.adb_step).also(root::addView)
-        ui.heading(setupPanel, "Shizuku setup")
-        setupInstructions = text(setupPanel, "Install/start Shizuku separately and allow ScrcpySend. Non-root users restart it after reboot. No pairing ports/codes are entered here.")
-        connectionNotice = ui.body(setupPanel, "").apply {
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        rootConsent = CheckBox(this).apply {
-            text = "I explicitly allow root-mode Shizuku (not required; shell mode recommended)"
-            isSaveEnabled = false
-            setOnCheckedChangeListener { _, checked -> if (checked && visible) { autoConnect.userRetry(); reconcileShizuku() } }
-        }
-        setupPanel.addView(rootConsent)
-        permissionButton = button(setupPanel, "Allow ScrcpySend in Shizuku") {
-            check(Shizuku.pingBinder()) { "Start Shizuku first" }
-            check(!Shizuku.isPreV11() && Shizuku.getVersion() >= 13) { "Update Shizuku to version 13+" }
-            if (Shizuku.shouldShowRequestPermissionRationale()) show("Open Shizuku > Authorized applications and allow ScrcpySend.")
-            else { permissionTicket = autoConnect.permissionRequested(); Shizuku.requestPermission(4201) }
-        }.apply { id = R.id.shizuku_permission }
-        connectButton = button(setupPanel, "Retry privileged capture") {
-            check(!CastService.active) { "Wait for sharing cleanup" }
-            autoConnect.userRetry(); reconcileShizuku()
-        }.apply { id = R.id.shizuku_connect }
-        cancelConnection = button(setupPanel, "Cancel") {
-            autoConnect.pause(); setup.disconnect(); readiness = setup.snapshot(); render()
-        }.apply { id = R.id.cancel_adb_setup }
-        openShizukuButton = button(setupPanel, "Open Shizuku") {
-            val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                ?: throw IllegalStateException("Shizuku is not installed; use Official download.")
-            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
-        installShizukuButton = button(setupPanel, "Official Shizuku download") {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
-        }
-        helpButton = button(setupPanel, "Help") {
-            AlertDialog.Builder(this).setTitle("Shizuku setup").setMessage(
-                "Install official Shizuku, start it using its Wireless debugging guide or computer ADB, then grant ScrcpySend permission. Restart after reboot on non-root devices. Root is not required. This app never pairs, approves permissions or changes Developer options for you. Available authorization triggers an actual privileged backend check automatically.")
-                .setPositiveButton("OK", null).show()
-        }
-        mainPanel = card(R.id.receiver_step).also(root::addView)
-        ui.heading(mainPanel, "Receivers")
-        text(mainPanel, "Trusted family LAN only: no encryption or authentication.")
-        empty = text(mainPanel, "No receivers found—open Receiver on the same Wi-Fi")
-        retryDiscovery = button(mainPanel, "Retry") { restartDiscovery() }.apply { id = R.id.retry_receiver_discovery }
-        receiverRows = panel(mainPanel, R.id.receiver_rows)
-        root.addView(capturePanel)
+        refreshInventory()
+    }
+
+    private fun requireReady(): ProjectionInventory.Snapshot {
+        val result = ProjectionInventory.read(this)
+        readiness = result
+        return result
+    }
+    private fun refreshInventory() {
+        try { readiness = ProjectionInventory.read(this) }
+        catch (e: Exception) { readiness = null; show("Capture capabilities unavailable: ${safe(e)}") }
         render()
     }
 
-    private fun reconcileShizuku() {
-        if (!visible || !::receiverRows.isInitialized) return
-        val proof = setup.snapshot()
-        availability = try { setup.status(this, rootConsent.isChecked || proof.rootApproved) }
-        catch (e: RuntimeException) {
-            accessError = "Shizuku Binder check failed: ${e.message ?: e.javaClass.simpleName}. Open Shizuku and retry."
-            if (proof.ready) setup.accessUnavailable(checkNotNull(accessError))
-            render(); return
-        }
-        accessError = null
-        if (proof.ready && availability != ShizukuState.CONNECTING) {
-            setup.accessUnavailable("Shizuku permission, Binder or supported identity is unavailable.")
-            return
-        }
-        readiness = setup.snapshot()
-        when (autoConnect.decide(availability, readiness.ready, readiness.state == ShizukuState.CONNECTING,
-            readiness.cleanupPending, CastService.active, Shizuku.getBinder())) {
-            ShizukuAutoConnect.Action.CHECK -> {
-                try { setup.connect(applicationContext, rootConsent.isChecked) }
-                catch (e: Exception) { accessError = "Shizuku check failed: ${safe(e)}. Retry when setup is idle." }
-            }
-            ShizukuAutoConnect.Action.REUSE, ShizukuAutoConnect.Action.NONE -> Unit
-        }
-        readiness = setup.snapshot(); render()
+    private fun requestCapture(request: ReceiverCasting.Request) {
+        check(pendingConsent == null) { "A screen-sharing request is already pending" }
+        val selected = Settings.from(Wire.parseJson(request.settings.toByteArray()))
+        ProjectionInventory.validate(this, selected, natural = null)
+        pendingConsent = request.token
+        try {
+            if (selected.audio && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), AUDIO_PERMISSION)
+            else requestProjection()
+        } catch (e: Exception) { pendingConsent = null; throw e }
     }
-    private fun renderShizuku() {
-        val available = availability == ShizukuState.CONNECTING
-        val failed = readiness.state == ShizukuState.ERROR && !readiness.checking
-        connectionNotice.text = when {
-            accessError != null -> accessError
-            readiness.cleanupPending -> "Finishing previous Shizuku cleanup..."
-            readiness.checking -> "Connecting to Shizuku; verifying privileged capture..."
-            autoConnect.paused && available -> "Automatic check paused. Tap Resume when ready."
-            available && failed -> readiness.message
-            else -> when (availability) {
-                ShizukuState.MISSING -> "Install official Shizuku first."
-                ShizukuState.STOPPED -> "Shizuku Binder unavailable. Open/start Shizuku, then return."
-                ShizukuState.DENIED -> "Allow ScrcpySend's Shizuku permission."
-                ShizukuState.ROOT_CONFIRMATION -> "Root-mode Shizuku requires explicit consent, or start Shizuku as shell."
-                ShizukuState.ERROR -> "Unsupported Shizuku identity/version. Update to Shizuku 13+ and use shell mode."
-                else -> "Preparing Shizuku capture check..."
+    private fun requestProjection() {
+        val token = pendingConsent ?: return
+        if (casting.snapshot().active?.request?.token != token) { pendingConsent = null; return }
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= 34)
+                manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+            else manager.createScreenCaptureIntent()
+            startActivityForResult(intent, SCREEN_PERMISSION)
+        } catch (e: Exception) {
+            pendingConsent = null
+            casting.complete(token, "Could not request screen sharing: ${safe(e)}")
+            throw e
+        }
+    }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == AUDIO_PERMISSION) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                try { requestProjection() } catch (e: Exception) { show("Could not request screen sharing: ${safe(e)}") }
+            }
+            else {
+                pendingConsent?.let { casting.complete(it, "Audio permission denied. Allow audio recording or disable audio in Settings before Play.") }
+                pendingConsent = null
             }
         }
-        val progress = readiness.checking && accessError == null
-        setupInstructions.visibility = if (progress || (available && !failed && !autoConnect.paused && accessError == null)) View.GONE else View.VISIBLE
-        permissionButton.visibility = if (!progress && availability == ShizukuState.DENIED) View.VISIBLE else View.GONE
-        rootConsent.visibility = if (!progress && (availability == ShizukuState.ROOT_CONFIRMATION || rootConsent.isChecked)) View.VISIBLE else View.GONE
-        installShizukuButton.visibility = if (!progress && availability == ShizukuState.MISSING) View.VISIBLE else View.GONE
-        openShizukuButton.visibility = if (!progress && availability != ShizukuState.MISSING &&
-            (!available || failed || autoConnect.paused || accessError != null)) View.VISIBLE else View.GONE
-        helpButton.visibility = if (!progress && (!available || failed || autoConnect.paused || accessError != null)) View.VISIBLE else View.GONE
-        connectButton.visibility = if (!progress && available && (failed || autoConnect.paused || accessError != null)) View.VISIBLE else View.GONE
-        connectButton.text = if (autoConnect.paused) "Resume privileged capture check" else "Retry privileged capture"
-        cancelConnection.visibility = if (readiness.checking) View.VISIBLE else View.GONE
-        permissionButton.isEnabled = !readiness.checking
-        rootConsent.isEnabled = !readiness.checking
     }
+    @Deprecated("Activity result API is retained for this framework Activity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SCREEN_PERMISSION) return
+        val token = pendingConsent ?: return
+        pendingConsent = null
+        val active = casting.snapshot().active
+        if (active?.request?.token != token || active.phase == ReceiverCasting.Phase.STOPPING) return
+        if (resultCode != RESULT_OK || data == null) {
+            casting.complete(token, "Screen sharing was cancelled. Press Play to try again."); return
+        }
+        try {
+            startForegroundService(Intent(this, CastService::class.java).setAction("start")
+                .putExtra("request", token).putExtra("projection", data))
+        } catch (e: Exception) { casting.complete(token, "Could not start sharing: ${safe(e)}") }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 20)
+    }
+
     private fun render(current: ReceiverCasting.Snapshot = casting.snapshot(),
-                       rows: List<ReceiverCasting.Row> = casting.rows(readiness.ready)) {
+                       rows: List<ReceiverCasting.Row> = casting.rows(readiness?.ready == true)) {
         if (!::receiverRows.isInitialized) return
         val owned = current.active
-        val effects = ReceiverMainScreen.effects(readiness.ready, visible, owned != null)
-        setupPanel.visibility = if (!readiness.ready && owned == null) View.VISIBLE else View.GONE
-        mainPanel.visibility = if (ReceiverMainScreen.listVisible(readiness.ready, owned != null)) View.VISIBLE else View.GONE
+        val effects = ReceiverMainScreen.effects(readiness?.ready == true, visible, owned != null)
         settingsButton.isEnabled = owned == null
-        ignoreSizeAndCrop.isEnabled = current.size.enabled
         refreshAppliedSettings(current)
         window.setFlags(if (effects.keepScreenOn) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0,
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        renderShizuku()
-        updates.refresh()
-        refreshVersion()
+        updates.refresh(); refreshVersion()
         empty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
-        retryDiscovery.visibility = if (readiness.ready && (rows.isEmpty() || discovery == null)) View.VISIBLE else View.GONE
+        retryDiscovery.visibility = if (rows.isEmpty() || discovery == null) View.VISIBLE else View.GONE
         receiverRows.removeAllViews()
         rows.forEach { row ->
             val line = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8))
-                background = surface()
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = ui.dp(8) }
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8)); background = surface()
             }
             val description = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            ui.label(description, row.target.name).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+            ui.label(description, row.target.name)
             text(description, row.target.host)
             if (row.detail.isNotEmpty()) ui.body(description, row.detail)
             line.addView(description, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             button(line, row.label) {
                 rowActions.press(ReceiverKey.of(row.target), row.requestToken, row.revision)
-            }.apply {
-                isEnabled = row.enabled
-                contentDescription = "${row.label}: ${row.target.name}, ${row.target.host}"
-            }
+            }.apply { isEnabled = row.enabled; contentDescription = "${row.label}: ${row.target.name}, ${row.target.host}" }
             receiverRows.addView(line)
         }
         editor.updateAvailability()
-        if (!readiness.ready && editor.showing) editor.dismiss()
         if (owned != null) reopenSettings = false
-        if (reopenSettings && effects.settingsEnabled) {
-            reopenSettings = false
-            try { editor.show() } catch (e: Exception) { show(safe(e)) }
-        }
+        if (reopenSettings && effects.settingsEnabled) { reopenSettings = false; editor.show() }
         updateDiscovery()
     }
     private fun updateDiscovery() {
-        traceDiscovery()
-        if (!visible || !readiness.ready) {
-            if (discovery != null) {
-                discoveryEpoch++; discovery?.close(); discovery = null
-                casting.updateDiscovery(emptyList())
-                traceDiscovery()
-            }
-            return
-        }
-        if (discovery != null) return
+        if (!visible || readiness?.ready != true || discovery != null) return
         val epoch = ++discoveryEpoch
         try {
             discovery = Discovery(this, { items -> runOnUiThread {
-                if (visible && readiness.ready && epoch == discoveryEpoch) casting.updateDiscovery(items)
+                if (visible && epoch == discoveryEpoch) casting.updateDiscovery(items)
             } }, { message -> runOnUiThread { if (visible && epoch == discoveryEpoch) show(message) } })
-            traceDiscovery()
-        } catch (e: Exception) {
-            android.util.Log.e("ScreenCopySender", "event=DISCOVERY_START_FAILED exception=${e.javaClass.simpleName}")
-            show("Discovery unavailable: ${safe(e)}. Retry on the same Wi-Fi.")
-        }
+        } catch (e: Exception) { show("Discovery unavailable: ${safe(e)}. Retry on the same Wi-Fi.") }
     }
-    private fun traceDiscovery() = discoveryTrace.state(
-        visible, readiness.ready, readiness.state.name, readiness.cleanupPending, discovery != null)
     private fun restartDiscovery() {
-        setup.requireReady()
+        refreshInventory()
         discoveryEpoch++; discovery?.close(); discovery = null
-        casting.updateDiscovery(emptyList())
-        updateDiscovery(); render()
+        casting.updateDiscovery(emptyList()); updateDiscovery()
     }
     override fun onSaveInstanceState(outState: Bundle) {
+        pendingConsent?.let { outState.putLong("pending_consent", it) }
         outState.putBundle("app_update_ui", updates.saveState())
-        outState.putBoolean("shizuku_auto_paused", autoConnect.paused)
         outState.putBundle("settings_draft", editor.save())
         super.onSaveInstanceState(outState)
     }
-    override fun onRetainNonConfigurationInstance(): Any = autoConnect
     override fun onStart() {
-        super.onStart(); visible = true; autoConnect.enter()
-        updates.start()
-        Shizuku.addRequestPermissionResultListener(permissionResult)
-        Shizuku.addBinderReceivedListenerSticky(binderReceived)
-        setup.observe(setupObserver); listBinding.attach()
-        render(); reconcileShizuku()
+        super.onStart(); visible = true; updates.start(); listBinding.attach(); refreshInventory()
     }
-    override fun onResume() { super.onResume(); updates.resume(); refreshVersion(); refreshAppliedSettings(); reconcileShizuku() }
+    override fun onResume() { super.onResume(); updates.resume(); refreshVersion(); refreshAppliedSettings() }
     override fun onStop() {
-        updates.stop()
-        visible = false; autoConnect.leave(isChangingConfigurations)
+        updates.stop(); visible = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Shizuku.removeRequestPermissionResultListener(permissionResult)
-        Shizuku.removeBinderReceivedListener(binderReceived)
-        setup.removeObserver(setupObserver); listBinding.detach()
-        discoveryEpoch++; discovery?.close(); discovery = null
-        traceDiscovery()
+        listBinding.detach(); discoveryEpoch++; discovery?.close(); discovery = null
         casting.updateDiscovery(emptyList())
         if (!isChangingConfigurations) { editor.dismiss(); reopenSettings = false }
-        if (!isChangingConfigurations && !CastService.active) setup.disconnect()
         super.onStop()
     }
     override fun onDestroy() {
-        if (isFinishing && !isChangingConfigurations)
-            casting.snapshot().active?.let { casting.cancelSizeSwitch(it.request.token) }
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (isFinishing && !isChangingConfigurations) pendingConsent?.let { casting.complete(it, "Screen-sharing request cancelled") }
         editor.dismiss(); super.onDestroy()
     }
     private fun refreshVersion() { installedVersion.text = getString(R.string.installed_version, updates.installedVersion) }
-    private fun panel(parent: LinearLayout, viewId: Int) = LinearLayout(this).apply {
-        id = viewId; orientation = LinearLayout.VERTICAL; isSaveEnabled = false; parent.addView(this)
-    }
     private fun surface() = GradientDrawable().apply {
-        setColor(ui.surfaceColor)
-        cornerRadius = ui.dp(12).toFloat()
-        setStroke(ui.dp(1), ui.outlineColor)
+        setColor(ui.surfaceColor); cornerRadius = ui.dp(12).toFloat(); setStroke(ui.dp(1), ui.outlineColor)
     }
     private fun card(viewId: Int) = LinearLayout(this).apply {
-        id = viewId
-        orientation = LinearLayout.VERTICAL
-        isSaveEnabled = false
-        background = surface()
+        id = viewId; orientation = LinearLayout.VERTICAL; isSaveEnabled = false; background = surface()
         setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = ui.dp(16) }
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = ui.dp(16) }
     }
     private fun text(parent: LinearLayout, value: String) = ui.description(parent, value)
     private fun button(parent: LinearLayout, label: String, action: () -> Unit) = Button(this).apply {
-        text = label; isAllCaps = false
-        minimumHeight = ui.dp(48)
-        setOnClickListener {
-            try { action() }
-            catch (e: ActivityNotFoundException) { show("No application can open this action. Use https://shizuku.rikka.app/download/ or open Shizuku manually.") }
-            catch (e: Exception) { show(safe(e)) }
-        }
-        parent.addView(this)
+        text = label; isAllCaps = false; minimumHeight = ui.dp(48)
+        setOnClickListener { try { action() } catch (e: Exception) { show(safe(e)) } }; parent.addView(this)
     }
     private fun safe(error: Exception): String = if (error is org.json.JSONException)
         "Invalid saved capture settings. Open Settings and correct/reset them, then Apply."
         else error.message ?: "Operation failed"
     private fun refreshAppliedSettings(current: ReceiverCasting.Snapshot = casting.snapshot()) {
-        if (!::appliedSettings.isInitialized || !::ignoreSizeAndCrop.isInitialized) return
+        if (!::appliedSettings.isInitialized) return
         val active = current.active
         renderingSize = true
-        ignoreSizeAndCrop.isChecked = current.size.requested
-        ignoreSizeAndCrop.isEnabled = current.size.enabled
+        ignoreSizeAndCrop.isChecked = current.size.requested; ignoreSizeAndCrop.isEnabled = current.size.enabled
         renderingSize = false
-        if (::sizeNotice.isInitialized) {
-            val manager = getSystemService(android.app.NotificationManager::class.java)
-            val notificationsAvailable = manager.areNotificationsEnabled() &&
-                manager.getNotificationChannel("casting")?.importance != android.app.NotificationManager.IMPORTANCE_NONE
-            sizeNotice.text = listOfNotNull(
-                current.size.message.takeIf { it.isNotEmpty() },
-                if (!notificationsAvailable)
-                    "Notification size action unavailable: notifications are disabled. You can use this home control; allow notifications through Android's normal app controls if wanted."
-                else if (active != null && !current.size.enabled && !current.size.busy && current.size.message.isEmpty())
-                    "Size switching becomes available when the cast is playing."
-                else null).joinToString("\n")
-            sizeNotice.visibility = if (sizeNotice.text.isEmpty()) View.GONE else View.VISIBLE
-        }
-        val heading = if (active == null) "Applied settings — next cast" else "Active cast request"
-        appliedSettingsHeading.text = heading
+        sizeNotice.text = current.size.message
+        sizeNotice.visibility = if (sizeNotice.text.isEmpty()) View.GONE else View.VISIBLE
+        appliedSettingsHeading.text = if (active == null) "Applied settings — next cast" else "Active cast request"
         appliedSettings.text = try {
-            val effective = if (active == null)
-                HomeCaptureSettings.effective(settings.readForEditing(), current.size.requested)
-            else Settings.from(Wire.parseJson(active.appliedRequest.settings.toByteArray(Charsets.UTF_8)))
-            val fullScreen = if (active == null) current.size.requested
-                else current.size.applied
-            HomeCaptureSettings.summary(effective, fullScreen)
-        } catch (e: Exception) {
-            "Unavailable: ${safe(e)}"
-        }
+            val effective = if (active == null) HomeCaptureSettings.effective(settings.readForEditing(), current.size.requested)
+                else Settings.from(Wire.parseJson(active.appliedRequest.settings.toByteArray()))
+            HomeCaptureSettings.summary(effective, if (active == null) current.size.requested else current.size.applied)
+        } catch (e: Exception) { "Unavailable: ${safe(e)}" }
     }
     private fun show(message: String) {
-        info.text = message
-        statusPanel.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+        info.text = message; statusPanel.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+    }
+    companion object {
+        private const val AUDIO_PERMISSION = 30
+        private const val SCREEN_PERMISSION = 31
     }
 }

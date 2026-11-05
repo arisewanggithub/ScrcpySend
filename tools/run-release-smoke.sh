@@ -7,7 +7,7 @@ for variable in ANDROID_KEYSTORE_PATH ANDROID_KEYSTORE_BASE64 ANDROID_KEY_ALIAS 
 done
 application_id=dev.screencopy.sender
 harness_id=dev.scrcpy.releasecheck.sender
-classes=dev.scrcpy.releasecheck.SourceCryptoCheck,dev.scrcpy.releasecheck.TargetResourcesCheck
+classes=dev.scrcpy.releasecheck.ProjectionApiCheck,dev.scrcpy.releasecheck.TargetResourcesCheck
 expected=5
 app=app/build/outputs/apk/release/app-release.apk
 mapfile -t harness_apks < <(find release-check/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk')

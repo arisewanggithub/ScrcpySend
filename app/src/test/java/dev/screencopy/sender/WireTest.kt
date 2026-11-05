@@ -8,9 +8,55 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.FilterInputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.nio.file.Path
 
 class WireTest {
+    @Test fun smallMessagesUseOneBulkSocketWriteAndLargeFramesUseABoundedPrefix() {
+        for (size in listOf(1, 192, 3840, 16384, 16385, Wire.MAX_VIDEO)) {
+            val payload = ByteArray(size) { (it * 31).toByte() }
+            val message = Wire.Message(Wire.VIDEO_FRAME, 1, 77, 1, 2, 1_234_567, payload)
+            val calls = mutableListOf<Triple<ByteArray, Int, Int>>()
+            val bytes = ByteArrayOutputStream()
+            var flushes = 0
+            val socket = object : OutputStream() {
+                override fun write(value: Int) { fail("Framing must not issue per-byte socket writes") }
+                override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                    calls += Triple(buffer, offset, length)
+                    bytes.write(buffer, offset, length)
+                }
+                override fun flush() { flushes++ }
+            }
+            Wire.write(socket, message)
+            assertEquals(if (size <= 16384) 1 else 2, calls.size)
+            assertEquals(40 + minOf(size, 16384), calls.first().third)
+            if (size > 16384) {
+                assertSame("Large payload must not be copied in its entirety", payload, calls[1].first)
+                assertEquals(16384, calls[1].second)
+                assertEquals(size - 16384, calls[1].third)
+            }
+            assertEquals(1, flushes)
+            val decoded = Wire.read(ByteArrayInputStream(bytes.toByteArray()))
+            assertEquals(message.copy(payload = decoded.payload), decoded)
+            assertArrayEquals(payload, decoded.payload)
+        }
+    }
+
+    @Test fun bulkWriteFailuresPropagateWithoutRetryOrSuccessShapedFlush() {
+        val failure = IOException("Disconnected")
+        var flushes = 0
+        val socket = object : OutputStream() {
+            override fun write(value: Int) { fail("Unexpected per-byte write") }
+            override fun write(buffer: ByteArray, offset: Int, length: Int) { throw failure }
+            override fun flush() { flushes++ }
+        }
+        val observed = assertThrows(IOException::class.java) {
+            Wire.write(socket, Wire.control(Wire.PING, 1, Wire.obj("nonce" to 3)))
+        }
+        assertSame(failure, observed)
+        assertEquals(0, flushes)
+    }
+
     @Test fun everyTrackMessageStillRequiresPositiveInternalCastSession() {
         for (type in listOf(Wire.STREAM_CONFIG, Wire.STREAM_READY, Wire.VIDEO_FRAME, Wire.AUDIO_PACKET)) {
             val track = if (type == Wire.AUDIO_PACKET) 2 else 1

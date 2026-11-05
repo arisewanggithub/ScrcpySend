@@ -154,7 +154,6 @@ class BitratesTest {
         restored.audioBitrate = 128_000; Bitrates.validate(restored, metadata)
         restored.audioCodec = "raw"; restored.audioBitrate = 1
         Bitrates.validate(restored, metadata)
-        assertFalse(CaptureBackend.options(restored, "00000001").contains("audio_bit_rate="))
         restored.audioBitrate = 0
         assertThrows(IllegalArgumentException::class.java) { restored.validate() }
     }
@@ -165,16 +164,13 @@ class BitratesTest {
         assertThrows(IllegalStateException::class.java) { CodecBitrates.fromReport(metadata.report() + "\n" + metadata.report()) }
         assertThrows(IllegalArgumentException::class.java) { EncoderBitrate("opus", "bad", 200_000, 100_000) }
     }
-    @Test fun realApplyAndPrivilegedStartupAreWiredToSharedValidation() {
+    @Test fun realApplyAndProjectionStartupAreWiredToSharedValidation() {
         val path = Path.of(System.getProperty("senderSources"))
         val editor = readUtf8Strict(path.resolve("CaptureSettingsEditor.kt"))
         assertTrue(editor.contains("HardwareEncoders.fromReport(proof).listedBy(proof).resolve(this)"))
         assertTrue(editor.contains("Bitrates.validate(resolved, CodecBitrates.fromReport(proof))"))
-        val backend = readUtf8Strict(path.resolve("CaptureBackend.kt"))
-        assertTrue(backend.contains("HardwareEncoders.fromReport(capabilities).listedBy(capabilities).resolve(settings)"))
-        assertTrue(backend.contains("Bitrates.validate(resolved, CodecBitrates.fromReport(capabilities))"))
-        val shell = readUtf8Strict(path.resolve("ShellCaptureService.kt"))
-        assertTrue(shell.contains("CodecBitrateDiscovery.read().report()"))
-        assertTrue(shell.contains("Bitrates.validate(config, CodecBitrateDiscovery.read())"))
+        val inventory = readUtf8Strict(path.resolve("ProjectionInventory.kt"))
+        assertTrue(inventory.contains("HardwareEncoderDiscovery.read().resolve(settings)"))
+        assertTrue(inventory.contains("Bitrates.validate(resolved, CodecBitrateDiscovery.read())"))
     }
 }

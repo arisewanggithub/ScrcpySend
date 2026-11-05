@@ -143,14 +143,22 @@ class VideoGeometryTest {
         assertTrue(editor.contains("X/Y are measured from the top-left in the display's default orientation."))
         assertFalse(editor.contains("Crop width (0 = disabled)"))
     }
-    @Test fun actualBoundaryRunsPrivilegedJointSdkPreflightBeforeNegotiationAndAgainBeforeLaunch() {
+    @Test fun actualBoundaryRunsPublicSdkPreflightBeforeNegotiationAndAgainBeforeCapture() {
         val sources = Path.of(System.getProperty("senderSources"))
-        val backend = readUtf8Strict(sources.resolve("CaptureBackend.kt"))
+        val backend = readUtf8Strict(sources.resolve("ProjectionCapture.kt"))
         val session = readUtf8Strict(sources.resolve("SenderSession.kt"))
-        assertTrue(backend.contains("bridge.validateVideo(checkNotNull(scid), resolved)"))
+        assertTrue(backend.contains("VideoEncoderPreflight.validate(settings, DisplayInventory(listOf(source)), naturalVideo)"))
+        assertTrue(session.indexOf("connected.connect()") < session.indexOf("capture.validate(settings"))
         assertTrue(session.indexOf("capture.validate(settings") < session.indexOf("Wire.SESSION_REQUEST"))
-        val service = readUtf8Strict(sources.resolve("ShellCaptureService.kt"))
-        assertTrue(service.contains("VideoEncoderPreflight.validate(config)"))
+        val service = readUtf8Strict(sources.resolve("ProjectionInventory.kt"))
+        assertTrue(service.contains("VideoEncoderPreflight.validate(resolved, inventory, natural)"))
+        assertTrue(service.contains("if (natural != null) VideoEncoderPreflight.validate"))
+        assertTrue(service.contains("natural: Boolean?"))
+        val activity = readUtf8Strict(sources.resolve("MainActivity.kt"))
+        assertTrue(activity.contains("ProjectionInventory.validate(this, selected, natural = null)"))
+        val castService = readUtf8Strict(sources.resolve("CastService.kt"))
+        assertTrue(castService.contains("current.validateSizeSwitch(it)"))
+        assertFalse(castService.contains("ProjectionInventory.validate(this, it)"))
         assertTrue(service.contains("HardwareEncoderDiscovery.read().resolve"))
         val query = readUtf8Strict(sources.resolve("VideoEncoderPreflight.kt"))
         assertTrue(query.contains("caps.isSizeSupported")); assertTrue(query.contains("caps.areSizeAndRateSupported"))
@@ -159,5 +167,22 @@ class VideoGeometryTest {
         assertTrue(query.contains("HardwareEncoderDiscovery.codecs(settings.videoCodec)"))
         assertTrue(query.contains("selected == it.name"))
         assertFalse(query.contains("debug.stagefright.swcodec"))
+    }
+
+    @Test fun negotiatedNaturalGeometryCanBeSupportedWhenTheLegacyRotatedRasterIsNot() {
+        val settings = Settings().apply {
+            cropWidth = 1080; cropHeight = 1920; cropY = 210; maxSize = 1920
+        }
+        val inventory = DisplayInventory(listOf(CaptureDisplay(0, "Panel", 2340, 1080, 1, 1)))
+        inventory.validate(settings)
+        val natural = ScrcpyVideoSizing.calculate(settings, inventory, natural = true)
+        val legacy = ScrcpyVideoSizing.calculate(settings, inventory, natural = false)
+        val limits = VideoLimits(128, 1080, 128, 1920, 2, 2, 1.0, 60.0)
+        assertEquals(VideoSize(1080, 1920), natural.output)
+        assertEquals(VideoSize(1920, 1080), legacy.output)
+        VideoGeometryValidation.validate(natural, listOf(EncoderGeometryCheck(limits, true, true)), false)
+        assertThrows(VideoGeometryException::class.java) {
+            VideoGeometryValidation.validate(legacy, listOf(EncoderGeometryCheck(limits, false, false)), false)
+        }
     }
 }

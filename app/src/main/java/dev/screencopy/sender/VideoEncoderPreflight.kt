@@ -4,18 +4,18 @@ import android.media.MediaCodecInfo
 import kotlin.math.ceil
 import kotlin.math.floor
 
-/** Queries metadata only under the verified UserService identity; never configures a codec. */
+/** Queries public codec metadata without starting capture. */
 internal object VideoEncoderPreflight {
-    fun validate(settings: Settings): VideoGeometry {
+    fun validate(settings: Settings, inventory: DisplayInventory, natural: Boolean = false): VideoGeometry {
         val selected = HardwareEncoderDiscovery.read().resolve(settings.videoCodec, settings.videoEncoder)
-        val geometry = ScrcpyVideoSizing.calculate(settings, DisplayInventoryDiscovery.read())
+        val geometry = ScrcpyVideoSizing.calculate(settings, inventory, natural)
         val mime = when (settings.videoCodec) { "h264" -> "video/avc"; "h265" -> "video/hevc"; else -> "video/av01" }
         val encoders = try {
             HardwareEncoderDiscovery.codecs(settings.videoCodec).filter { selected == it.name }
         } catch (e: IllegalStateException) {
-            throw VideoGeometryException(geometry, VideoGeometryReason.METADATA_UNAVAILABLE, "Video capability query failed. Reconnect Shizuku and retry.")
+            throw VideoGeometryException(geometry, VideoGeometryReason.METADATA_UNAVAILABLE, "Video capability query failed. Retry and retry.")
         } catch (e: SecurityException) {
-            throw VideoGeometryException(geometry, VideoGeometryReason.METADATA_UNAVAILABLE, "Video capability access unavailable. Reconnect Shizuku and retry.")
+            throw VideoGeometryException(geometry, VideoGeometryReason.METADATA_UNAVAILABLE, "Video capability access unavailable. Retry and retry.")
         }
         val checks = encoders.map { encoder ->
             try {

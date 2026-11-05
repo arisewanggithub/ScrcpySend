@@ -140,6 +140,20 @@ class MediaBudget internal constructor(private val withAudio: Boolean, private v
     fun endWrite() = synchronized(monitor) {
         lastWriteMs = ((clock() - writeBegin) / 1_000_000).coerceAtLeast(0)
         writerQueue = null; writerBytes = 0; dequeued = null
+        monitor.notifyAll()
+    }
+
+    fun awaitVideoDrain() = synchronized(monitor) {
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (true) {
+            if (ending) throw SessionCancelledException()
+            if (video.isEmpty() && ready[1] == generation[1] &&
+                dequeued?.message?.track != 1 && writerQueue != SenderQueue.VIDEO) break
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0)
+                throw IOException("CONGESTION: previous video generation did not drain within 10000 ms before encoder restart")
+            monitor.wait(remaining / 1_000_000, (remaining % 1_000_000).toInt())
+        }
     }
 
     fun ready(track: Int, gen: Int) = synchronized(monitor) {

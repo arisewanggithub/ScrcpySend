@@ -25,7 +25,7 @@ import android.widget.Button
 
 internal class CaptureSettingsEditor(
     private val activity: Activity, private val store: CaptureSettingsStore,
-    private val requireReady: () -> ShizukuSetup.Snapshot, private val active: () -> Boolean,
+    private val requireReady: () -> ProjectionInventory.Snapshot, private val active: () -> Boolean,
     private val report: (String) -> Unit,
     private val refreshDisplays: (((Result<DisplayInventory>) -> Unit) -> Unit)? = null,
     private val onApplied: () -> Unit = {},
@@ -139,9 +139,9 @@ internal class CaptureSettingsEditor(
         encoderInfo["audio"] = text("")
         spinner("audioBitrate", "Audio bitrate (kbps)", emptyList())
         audioRateInfo = text("")
-        spinner("audioSource", "Audio source", listOf("output", "playback", "mic"))
-        text("Output capture may mute local playback.")
-        text("Changes apply to the next cast. On Android 11, unlock the phone before starting. Protected content may be blank.")
+        spinner("audioSource", "Audio source", listOf("playback", "mic", "output"))
+        text("Playback captures eligible media/game audio only; apps can block capture. The phone's media stream is muted during sharing and restored when sharing ends. Legacy output uses the same playback API. Mic captures your microphone without muting playback.")
+        text("Changes apply to the next cast. Android asks for sharing consent on Play. Protected content may be blank.")
         checkUpdates?.let { check ->
             section("App")
             form.addView(Button(activity).apply {
@@ -489,7 +489,7 @@ internal class CaptureSettingsEditor(
         val selected = choices.getValue("displayId").selectedItem as? DisplayInventory.Choice
         val display = selected?.display
         displayInfo.text = when {
-            displayRefreshing -> "Refreshing actual screens through Shizuku..."
+            displayRefreshing -> "Refreshing actual screens from Android..."
             displayError != null -> displayError
             display == null -> "Selected screen is unavailable. Refresh screens and choose one explicitly; no default is substituted."
             display.rotation == null -> "Dimensions from the verified backend. Refresh screens for natural crop bounds."
@@ -506,7 +506,7 @@ internal class CaptureSettingsEditor(
         val generation = try { requireReady().generation } catch (e: Exception) {
             displayRefreshing = false; showFailure(e); updateAvailability(); return
         }
-        notice.text = "Refreshing screens through Shizuku. Apply will be available when this finishes."
+        notice.text = "Refreshing capture display metadata. Apply will be available when this finishes."
         choices.getValue("displayId").isEnabled = false
         updateDisplayInfo(); updateAvailability()
         fun finish(result: Result<DisplayInventory>) {
@@ -517,15 +517,15 @@ internal class CaptureSettingsEditor(
                 val selected = selectedDisplayId()
                 displayRefreshing = false
                 val checked = try {
-                    check(requireReady().generation == generation) { "Shizuku changed. Reconnect and refresh screens." }
+                    check(requireReady().generation == generation) { "Capture capabilities changed. Refresh screens." }
                     result
                 } catch (e: Exception) { Result.failure(e) }
                 checked.fold({ inventory ->
                     displays = inventory
-                    displayError = if (inventory.displays.isEmpty()) "No capture screens available. Refresh or reconnect Shizuku." else null
+                    displayError = if (inventory.displays.isEmpty()) "No capture screens available. Refresh and retry." else null
                 }, { error ->
                     displays = DisplayInventory(emptyList())
-                    displayError = "Screen refresh failed: ${error.message ?: error.javaClass.simpleName}. Retry or reconnect Shizuku."
+                    displayError = "Screen refresh failed: ${error.message ?: error.javaClass.simpleName}. Retry."
                 })
                 setDisplays(selected); updateAvailability()
                 notice.text = displayError ?: "Screens refreshed. Review the settings, then Apply to save."

@@ -24,23 +24,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
       - name: Verify publication script contracts
         shell: pwsh
         run: ./tools/test-publication.ps1
       - name: Install pinned Android tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - name: JVM tests, lint and debug build (no devices)
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest lintDebug assembleDebug -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --console plain
       - name: Compile unsigned optimized release (R8 and resource shrinking)
         run: |
-          ./gradlew :app:assembleRelease -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease -PrequireReleaseSigning=false --no-daemon --console plain
       - name: Retain JVM test XML for diagnosis
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -66,13 +63,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
       - name: Install pinned SDK and isolated emulator
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
           mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name update-ui --package "system-images;android-35;google_apis;x86_64"
           bash tools/set-ci-avd-userdata.sh "$ANDROID_AVD_HOME/update-ui.avd/config.ini"
@@ -80,7 +74,7 @@ jobs:
       - name: Build unsigned-development app and UI test APKs
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console plain
       - name: Run only AppUpdateRemoteUiTest on disposable emulator
         run: |
           set -euo pipefail
@@ -168,19 +162,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
       - name: Install pinned tools and disposable emulator
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
           sudo chmod 666 /dev/kvm
       - name: Build optimized non-debuggable app and safe release test APK
         run: |
           chmod +x gradlew
           pwsh -NoProfile -File tools/verify-release-smoke-apks.ps1 -SelfTest
-          ./gradlew :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PrequireReleaseSigning=false --no-daemon --console plain
       - name: Run only safe optimized-release tests
         run: bash tools/run-release-smoke.sh
       - name: Stop disposable release-smoke emulator
@@ -307,19 +298,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
       - name: Install pinned Android tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - name: Build signed Custom TCP release
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || { echo "::error::Signed checkout differs from validated release revision"; exit 1; }
           chmod +x gradlew
-          ./gradlew :app:assembleRelease -PrequireReleaseSigning=true -PreleaseSmokeTest=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease -PrequireReleaseSigning=true -PreleaseSmokeTest=false --no-daemon --console plain
       - name: Retain exact signed-release R8 mapping (not a release asset)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

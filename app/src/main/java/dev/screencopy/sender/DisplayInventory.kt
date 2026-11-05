@@ -29,7 +29,7 @@ internal class DisplayInventory(val displays: List<CaptureDisplay>) {
         }
     }
     fun requireAvailable() {
-        if (displays.isEmpty()) throw IOException("No capture displays available. Refresh displays or reconnect Shizuku.")
+        if (displays.isEmpty()) throw IOException("No capture displays available. Refresh displays or retry.")
     }
     fun choices(selected: Int): List<Choice> {
         val choices = displays.sortedWith(compareBy<CaptureDisplay> { it.id != 0 }.thenBy { it.id })
@@ -58,7 +58,7 @@ internal class DisplayInventory(val displays: List<CaptureDisplay>) {
         private const val PREFIX = "SCREENCOPY_DISPLAYS:"
         fun fromReport(report: String): DisplayInventory {
             val structured = report.lineSequence().filter { it.startsWith(PREFIX) }.toList()
-            if (structured.size > 1) throw IOException("Duplicate privileged display inventory; reconnect Shizuku.")
+            if (structured.size > 1) throw IOException("Duplicate privileged display inventory; retry.")
             if (structured.isNotEmpty()) {
                 val array = JSONArray(structured.single().removePrefix(PREFIX))
                 if (array.length() > 128) throw IOException("Display inventory exceeds limit")
@@ -70,7 +70,7 @@ internal class DisplayInventory(val displays: List<CaptureDisplay>) {
             }
             val parsed = Regex("--display-id=([0-9]+)\\s+\\(([^)]*)\\)").findAll(report).map { match ->
                 val size = Regex("([0-9]+)x([0-9]+)").matchEntire(match.groupValues[2])
-                    ?: throw IOException("Display size unavailable. Reconnect Shizuku to refresh display inventory.")
+                    ?: throw IOException("Display size unavailable. Retry to refresh display inventory.")
                 CaptureDisplay(match.groupValues[1].toInt(), "", size.groupValues[1].toInt(),
                     size.groupValues[2].toInt(), null, 0)
             }.toList()

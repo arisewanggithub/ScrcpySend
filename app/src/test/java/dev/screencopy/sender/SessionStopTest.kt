@@ -16,7 +16,34 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class SessionStopTest {
-    private fun syntheticSizeSwitch(backend: CaptureBackend): SenderSession {
+    @Test fun heartbeatCannotBeStarvedByAnAlwaysNonemptyMediaQueue() {
+        val session = sender()
+        val queue = Mockito.mock(MediaBudget::class.java)
+        val link = Mockito.mock(ReceiverLink::class.java)
+        val ping = CountDownLatch(1)
+        val frame = Wire.Message(Wire.VIDEO_FRAME, 1, 1, 1, 1, 1_000_000, byteArrayOf(1))
+        Mockito.`when`(queue.poll(100)).thenReturn(frame)
+        Mockito.doAnswer { call ->
+            if (call.getArgument<Wire.Message>(0).type == Wire.PING) {
+                ping.countDown(); Thread.currentThread().interrupt()
+            }
+            null
+        }.`when`(link).send(Mockito.any(Wire.Message::class.java) ?: frame)
+        for ((name, value) in listOf("link" to link, "mux" to queue, "acceptedSession" to true))
+            SenderSession::class.java.getDeclaredField(name).apply { isAccessible = true }.set(session, value)
+        val method = SenderSession::class.java.getDeclaredMethod("writeLoop").apply { isAccessible = true }
+        val writer = Thread { method.invoke(session) }.apply { start() }
+        try { assertTrue("Continuous media must not prevent a liveness probe", ping.await(1, TimeUnit.SECONDS)) }
+        finally { writer.interrupt(); writer.join(1000) }
+        assertFalse(writer.isAlive)
+    }
+
+    @Test fun socketReadTimeoutIsAProtocolTimeoutNotAnInternalError() {
+        val outcome = SessionOutcome()
+        outcome.record(java.net.SocketTimeoutException("Read timed out"), SessionOutcome.Origin.RECEIVER_READ)
+        assertEquals("TIMEOUT", outcome.terminal(1, false).json().getString("code"))
+    }
+    private fun syntheticSizeSwitch(backend: ProjectionCapture): SenderSession {
         val session = sender()
         for ((name, value) in listOf("acceptedSession" to true, "playing" to true, "backend" to backend))
             SenderSession::class.java.getDeclaredField(name).apply { isAccessible = true }.set(session, value)
@@ -31,34 +58,31 @@ class SessionStopTest {
     }
 
     @Test fun sizeRestartEligibilityBecomesTrueOnlyAfterActualOwnedSyntheticCleanupReturns() {
-        val backend = Mockito.mock(CaptureBackend::class.java)
+        val backend = Mockito.mock(ProjectionCapture::class.java)
         val session = syntheticSizeSwitch(backend)
         assertFalse(session.cleanSizeSwitch)
         session.run()
         Mockito.verify(backend).close()
-        Mockito.verify(backend, Mockito.never()).deploy()
         assertTrue(session.cleanSizeSwitch)
     }
 
     @Test fun anySyntheticCleanupExceptionIncludingCancellationShapedEofBlocksSizeRestart() {
         for (error in listOf(IOException("Cleanup failed"), EOFException("Cleanup incomplete"))) {
-            val backend = Mockito.mock(CaptureBackend::class.java)
+            val backend = Mockito.mock(ProjectionCapture::class.java)
             Mockito.doThrow(error).`when`(backend).close()
             val session = syntheticSizeSwitch(backend)
             session.run()
             assertFalse(session.cleanSizeSwitch)
             Mockito.verify(backend).close()
-            Mockito.verify(backend, Mockito.never()).deploy()
         }
     }
 
     @Test fun ordinaryStopRevokesPendingSizeAuthorizationEvenWhenAlreadyStopping() {
-        val backend = Mockito.mock(CaptureBackend::class.java)
+        val backend = Mockito.mock(ProjectionCapture::class.java)
         val session = syntheticSizeSwitch(backend)
         session.stop()
         session.run()
         assertFalse(session.cleanSizeSwitch)
-        Mockito.verify(backend, Mockito.never()).deploy()
     }
 
     @Test fun syntheticSupportedPlayingCodecsAllowExactlyOneExplicitSizeStopButNotRestartYet() {
@@ -92,8 +116,8 @@ class SessionStopTest {
         }
     }
 
-    @Test fun cleanupClosesCaptureBackend() {
-        val backend = Mockito.mock(CaptureBackend::class.java)
+    @Test fun cleanupClosesProjectionCapture() {
+        val backend = Mockito.mock(ProjectionCapture::class.java)
         val session = SenderSession(Mockito.mock(Context::class.java),
             Settings().apply { audio = false; videoCodec = "unsupported" },
             ReceiverTarget("127.0.0.1", 27184), {}, {}, {})
@@ -103,7 +127,7 @@ class SessionStopTest {
     }
 
     @Test fun cleanupClosesCaptureAndRetainsFirstFailure() {
-        val backend = Mockito.mock(CaptureBackend::class.java)
+        val backend = Mockito.mock(ProjectionCapture::class.java)
         val logs = mutableListOf<String>()
         val session = SenderSession(Mockito.mock(Context::class.java),
             Settings().apply { audio = false; videoCodec = "unsupported" },
@@ -130,7 +154,7 @@ class SessionStopTest {
         val error = assertThrows(SessionCancelledException::class.java) {
             session.packet(Wire.Message(Wire.VIDEO_FRAME, 1, 1, 1, 1, 100, byteArrayOf(1)))
         }
-        session.captureFailed(error) // Exact CaptureBackend reader -> callback path after sink rejection.
+        session.captureFailed(error) // Exact ProjectionCapture reader -> callback path after sink rejection.
         assertEquals(Wire.STOP, session.terminalMessage().type)
         assertTrue(logs.any { it.contains("exception=SessionCancelledException") && it.contains("retained=false") })
         session.stop()
@@ -248,31 +272,7 @@ class SessionStopTest {
             peer.get(1, TimeUnit.SECONDS)
         }
     }
-    private class BlockedCommand : Process() {
-        val destroyed = CountDownLatch(1)
-        val closeDone = CountDownLatch(1)
-        val destroyCalls = java.util.concurrent.atomic.AtomicInteger()
-        override fun destroy() { destroyCalls.incrementAndGet(); destroyed.countDown() }
-        override fun getInputStream(): InputStream = object : InputStream() {
-            override fun read(): Int { destroyed.await(); return -1 }
-            override fun close() { check(destroyed.await(1, TimeUnit.SECONDS)); closeDone.countDown() }
-        }
-        override fun getOutputStream() = ByteArrayOutputStream()
-        override fun getErrorStream() = InputStream.nullInputStream()
-        override fun waitFor(): Int { destroyed.await(); return 0 }
-        override fun exitValue() = 0
-    }
-    @Test fun nonCaptureOwnedCommandIsTerminatedBeforePotentiallyLockedReadClose() {
-        val process = BlockedCommand()
-        val done = CompletableFuture.runAsync {
-            CaptureCancellation.closeOwnedProcess(process, false) { process.inputStream.close() }
-        }
-        done.get(500, TimeUnit.MILLISECONDS)
-        assertEquals(1, process.destroyCalls.get())
-        assertEquals(0L, process.closeDone.count)
-    }
-    @Test fun captureGuardianNeverGetsProcessDestroyAndLeaseRemainsStoppingUntilCleanupReturns() {
-        val process = BlockedCommand()
+    @Test fun projectionLeaseRemainsStoppingUntilOwnedCleanupReturns() {
         val model = ReceiverCasting { 1L }
         model.updateDiscovery(listOf(Discovery.Receiver("TV", "192.0.2.1", 27184, "available", 1)))
         val request = model.reserve(ReceiverKey("192.0.2.1", 27184), Settings())
@@ -280,13 +280,12 @@ class SessionStopTest {
         val owner = checkNotNull(service.adopt(request.token))
         val closing = CountDownLatch(1); val release = CountDownLatch(1)
         val worker = CompletableFuture.runAsync {
-            CaptureCancellation.closeOwnedProcess(process, true) { closing.countDown(); release.await() }
+            closing.countDown(); release.await()
             service.finish(owner)
         }
         model.requestStop(request.token)
         assertTrue(closing.await(1, TimeUnit.SECONDS))
         assertEquals(ReceiverCasting.Phase.STOPPING, model.snapshot().active?.phase)
-        assertEquals(0, process.destroyCalls.get())
         release.countDown(); worker.get(1, TimeUnit.SECONDS)
         assertNull(model.snapshot().active)
     }

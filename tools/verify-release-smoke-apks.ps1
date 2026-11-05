@@ -70,18 +70,21 @@ function Assert-Separation($appClasses, $testClasses, [string]$id) {
         }
     }
     $roots = if ($id -eq 'dev.screencopy.sender') {
-        @('Ldev/screencopy/sender/ShellCaptureService;')
+        @('Ldev/screencopy/sender/MainActivity;', 'Ldev/screencopy/sender/CastService;')
     } else { @('Lorg/screencopy/receiver/media/OpusDecoder;') }
     foreach ($type in $roots) {
         if ($type -cnotin $appClasses -or $type -cin $testClasses) { throw 'JNI/reflection roots must exist exclusively in optimized app DEX' }
     }
     if ('Ldev/scrcpy/update/UpdateTestActivity;' -cin $appClasses) { throw 'Debug updater Activity leaked into release' }
+    foreach ($fixture in @('Ldev/screencopy/sender/ProjectionConsentTestActivity;', 'Ldev/screencopy/sender/ProjectionNetworkProbeService;')) {
+        if ($fixture -cin $appClasses) { throw 'Debug projection diagnostic leaked into release' }
+    }
 }
 
 if ($SelfTest) {
-    $roots = @('Ldev/screencopy/sender/ShellCaptureService;')
+    $roots = @('Ldev/screencopy/sender/MainActivity;', 'Ldev/screencopy/sender/CastService;')
     Assert-Separation $roots @('Ltest/Test;') 'dev.screencopy.sender'
-    Assert-Separation $roots @('Ldev/scrcpy/releasecheck/SourceCryptoCheck;') 'dev.screencopy.sender'
+    Assert-Separation $roots @('Ldev/scrcpy/releasecheck/ProjectionApiCheck;') 'dev.screencopy.sender'
     foreach ($badTest in @('Lorg/conscrypt/Conscrypt;', 'Ldev/screencopy/sender/LocalAdb;',
         'Ldev/screencopy/sender/CodecConfig;', 'Ldev/screencopy/sender/MainActivity;',
         'Ldev/screencopy/sender/Secrets;', 'Ldev/screencopy/sender/Wire;',

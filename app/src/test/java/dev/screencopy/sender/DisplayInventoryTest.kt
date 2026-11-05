@@ -8,19 +8,11 @@ import java.nio.file.Path
 class DisplayInventoryTest {
     private fun display(id: Int, name: String = "Panel", width: Int = 1080, height: Int = 2400,
                         rotation: Int = 0, type: Int = 1) = CaptureDisplay(id, name, width, height, rotation, type)
-    class FakeInfo(@JvmField val name: String, @JvmField val logicalWidth: Int,
-                   @JvmField val logicalHeight: Int, @JvmField val rotation: Int, @JvmField val type: Int)
-    class FakeManager {
-        fun getDisplayIds() = intArrayOf(0, 7, 42)
-        fun getDisplayInfo(id: Int): FakeInfo? = when (id) {
-            0 -> FakeInfo("Phone panel", 1080, 2400, 0, 1)
-            7 -> FakeInfo("HDMI monitor", 1920, 1080, 0, 2)
-            42 -> FakeInfo("Presentation", 800, 600, 1, 5)
-            else -> null
-        }
-    }
+    private fun inventory() = DisplayInventory(listOf(
+        display(0, "Phone panel"), display(7, "HDMI monitor", 1920, 1080, 0, 2),
+        display(42, "Presentation", 800, 600, 1, 5)))
     @Test fun productionDiscoveryReadsRealIdsNamesTypesDimensionsAndRotationWithoutContiguousAssumption() {
-        val inventory = DisplayInventoryDiscovery.read(FakeManager())
+        val inventory = inventory()
         assertEquals(listOf(0, 7, 42), inventory.displays.map { it.id })
         assertEquals("HDMI monitor", inventory.displays[1].name)
         assertEquals(1920, inventory.displays[1].width)
@@ -28,7 +20,7 @@ class DisplayInventoryTest {
         assertEquals(800, inventory.displays[2].naturalHeight)
     }
     @Test fun structuredInventoryRoundTripsAndRefreshReplacesOnlyInternalDisplayMetadata() {
-        val inventory = DisplayInventoryDiscovery.read(FakeManager())
+        val inventory = inventory()
         val report = "--video-codec=h264\n--display-id=0 (100x200)\n" + inventory.report()
         assertEquals(inventory.displays, DisplayInventory.fromReport(report).displays)
         val fresh = DisplayInventory(listOf(display(17, "Fresh")))
@@ -46,7 +38,7 @@ class DisplayInventoryTest {
         assertThrows(IOException::class.java) { inventory.validate(crop) }
     }
     @Test fun friendlyLabelsShowMainExternalVirtualAndSecondaryIdsWithoutParsingLabelsAsIds() {
-        val inventory = DisplayInventoryDiscovery.read(FakeManager())
+        val inventory = inventory()
         val choices = inventory.choices(7)
         assertTrue(choices[0].toString().startsWith("Main screen - Phone panel"))
         assertTrue(choices[1].toString().contains("External screen - HDMI monitor"))
@@ -84,7 +76,6 @@ class DisplayInventoryTest {
         assertThrows(IOException::class.java) { DisplayInventory.fromReport(empty.report() + "\n" + empty.report()) }
         assertThrows(IllegalArgumentException::class.java) { DisplayInventory(listOf(display(7), display(7))) }
         assertThrows(IllegalArgumentException::class.java) { display(-1) }
-        assertThrows(IOException::class.java) { DisplayInventoryDiscovery.read(Any()) }
     }
     @Test fun cropUsesSelectedPrivilegedNaturalBoundsAcrossRotationAndFreshSizeChanges() {
         val inventory = DisplayInventory(listOf(display(7, width = 2400, height = 1080, rotation = 1)))
@@ -113,16 +104,10 @@ class DisplayInventoryTest {
         assertTrue(editor.contains("dialog !== current"))
         assertTrue(editor.contains("displays.validate(this)"))
         assertTrue(editor.contains("Changes apply to the next cast."))
-        val setup = readUtf8Strict(path.resolve("ShizukuSetup.kt"))
-        assertTrue(setup.contains("displayWorker.execute"))
-        assertTrue(setup.contains("owned.remote().displayInventory()"))
-        assertTrue(setup.contains("DisplayInventory.fromReport(text).requireAvailable()"))
-        val backend = readUtf8Strict(path.resolve("CaptureBackend.kt"))
-        assertTrue(backend.contains("HardwareEncoders.fromReport(capabilities).listedBy(capabilities).resolve(settings)"))
-        assertTrue(backend.contains("DisplayInventory.fromReport(capabilities).validate(resolved)"))
-        assertTrue(backend.contains("bridge.validateVideo(checkNotNull(scid), resolved)"))
-        assertTrue(backend.contains("return resolved"))
-        assertTrue(readUtf8Strict(path.resolve("ShellCaptureService.kt")).contains("DisplayInventoryDiscovery.read().validate(config)"))
+        val inventory = readUtf8Strict(path.resolve("ProjectionInventory.kt"))
+        assertTrue(inventory.contains("inventory.validate(resolved)"))
+        assertTrue(inventory.contains("VideoEncoderPreflight.validate(resolved, inventory, natural)"))
+        assertTrue(inventory.contains("return resolved"))
     }
     @Test fun automaticAndExplicitEncoderResolutionPreserveAuthoritativeDisplayCropAndGeometry() {
         val inventory = DisplayInventory(listOf(display(7, width = 2400, height = 1080, rotation = 1)))

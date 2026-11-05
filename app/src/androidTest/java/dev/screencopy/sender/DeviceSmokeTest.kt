@@ -11,23 +11,25 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class DeviceSmokeTest {
-    @Test fun encryptedIdentityAndAdbCertificateCanBeCreatedOnAndroid() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val store = Secrets(context)
-        LocalAdb(store).use { adb ->
-            assertEquals("127.0.0.1", adb.hostAddress)
-            assertNotNull(adb.getCertificate())
-            assertEquals("RSA", adb.getPrivateKey().algorithm)
-            val encoded = adb.getCertificate().encoded
-            LocalAdb(Secrets(context)).use { restored -> assertArrayEquals(encoded, restored.getCertificate().encoded) }
-        }
+    @Test fun publicProjectionInventoryAndPreflightWorkFromApplicationContextWithoutConsent() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
+        val snapshot = ProjectionInventory.read(context)
+        val display = DisplayInventory.fromReport(snapshot.capabilities).displays.single()
+        assertEquals(0, display.id)
+        assertTrue(display.width > 0 && display.height > 0)
+        val settings = Settings().apply { audio = false; maxSize = 640; maxFps = 30 }
+        val resolved = ProjectionInventory.validate(context, settings, natural = false)
+        assertTrue(resolved.videoEncoder.isNotEmpty())
+        assertEquals(640, VideoEncoderPreflight.validate(resolved, ProjectionInventory.displays(context)).output.let {
+            maxOf(it.width, it.height)
+        })
     }
     @Test fun realCodecInventoryIsQueryableWithoutStartingCapture() {
         assertTrue(MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.isNotEmpty())
-        assertFalse(CaptureBackend.encoders("h264").isEmpty())
+        assertFalse(HardwareEncoderDiscovery.read().names("h264").isEmpty())
         val result = Bundle().apply {
-            putString("senderOpusEncoders", CaptureBackend.encoders("opus").toString())
-            putString("senderH264Encoders", CaptureBackend.encoders("h264").toString())
+            putString("senderOpusEncoders", HardwareEncoderDiscovery.read().names("opus").toString())
+            putString("senderH264Encoders", HardwareEncoderDiscovery.read().names("h264").toString())
         }
         InstrumentationRegistry.getInstrumentation().sendStatus(0, result)
     }
