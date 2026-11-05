@@ -1,6 +1,5 @@
 plugins { id 'com.android.application' }
 
-def srtTrial = providers.gradleProperty('srtTrial').getOrElse('false').toBoolean()
 def releaseSmokeValue = providers.gradleProperty('releaseSmokeTest').getOrElse('false')
 def requireSigningValue = providers.gradleProperty('requireReleaseSigning').getOrElse('false')
 if (!(releaseSmokeValue in ['true', 'false']) || !(requireSigningValue in ['true', 'false'])) {
@@ -15,7 +14,6 @@ def productionSigningConfigured = providers.gradleProperty('releaseSigningKeysto
 if (releaseSmokeTest && (requireReleaseSigning || productionSigningConfigured)) {
     throw new GradleException('Release smoke signing is test-only and cannot coexist with publication or production signing configuration')
 }
-if (releaseSmokeTest && !srtTrial) throw new GradleException('Release smoke requires srtTrial=true; skipped native tests are forbidden')
 def releaseVersionCode = providers.gradleProperty('releaseVersionCode').getOrElse('1').toInteger()
 if (releaseVersionCode < 1) throw new GradleException('releaseVersionCode must be a positive Android version code')
 def releaseKeystore = providers.gradleProperty('releaseSigningKeystorePath')
@@ -50,9 +48,6 @@ android {
     }
     testOptions { unitTests.returnDefaultValues = false }
     buildFeatures { aidl true; buildConfig true }
-    defaultConfig {
-        buildConfigField 'boolean', 'SRT_TRIAL', srtTrial.toString()
-    }
     lint { abortOnError true }
     buildTypes {
         release {
@@ -78,18 +73,6 @@ android {
     }
     ndkVersion '27.2.12479018'
     sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/supervisorAssets').get().asFile)
-}
-
-if (srtTrial) {
-    android.defaultConfig {
-        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
-        externalNativeBuild {
-            cmake { arguments '-DANDROID_STL=c++_static' }
-        }
-    }
-    android.externalNativeBuild {
-        cmake { path file('src/main/srt/CMakeLists.txt'); version '3.22.1' }
-    }
 }
 
 // An executable, not a JNI library: its single-threaded wait ownership is the safety boundary.
@@ -151,7 +134,6 @@ if (providers.gradleProperty('receiverClasses').isPresent()) {
 }
 
 dependencies {
-    implementation project(':streaming-muxer')
     implementation 'androidx.media3:media3-common:1.11.1'
     implementation 'androidx.media3:media3-container:1.11.1'
     implementation 'dev.rikka.shizuku:api:13.1.5'

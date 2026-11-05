@@ -17,7 +17,6 @@ import java.util.UUID
 import org.xmlpull.v1.XmlPullParser
 
 @RunWith(AndroidJUnit4::class)
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SenderDiagnosticPrecisionTest {
     private fun persistedValues(file: File): Map<String, String> = file.inputStream().use { input ->
         val parser = Xml.newPullParser().apply { setInput(input, "UTF-8") }
@@ -49,7 +48,7 @@ class SenderDiagnosticPrecisionTest {
         }
         try {
             val trace = SessionStopTrace({ SenderFailureStore.recordDiagnostic(isolated, it) })
-            val settings = Settings().apply { mediaTransportMode = "srt" }
+            val settings = Settings()
             for (id in listOf(764986395015999395L, 764986395015999396L, Long.MAX_VALUE - 1, Long.MAX_VALUE)) {
                 val json = JSONObject().put("session", id.toString()).put("timestamp_ms", "1793419722366")
                 val committed = prefs.edit().putString("roundTrip", json.toString()).commit()
@@ -62,7 +61,7 @@ class SenderDiagnosticPrecisionTest {
                 assertEquals(1793419722366L, SenderFailureStore.exactLong(decoded, "timestamp_ms"))
                 trace.sessionStarted(id)
                 assertEquals(id, checkNotNull(persistedValues(file)["currentSessionId"]).toLong())
-                trace.firstFailure(IOException("SRT send: native failure (code 2001)"),
+                trace.firstFailure(IOException("CAPTURE_FAILED: output failed"),
                     SessionStopTrace.Phase.STREAMING, SessionOutcome.Origin.CAPTURE, id, settings, 1793419722366)
                 val stored = persistedValues(file)
                 assertEquals(id, checkNotNull(stored["lastSessionFailureId"]).toLong())
@@ -71,11 +70,11 @@ class SenderDiagnosticPrecisionTest {
                 assertEquals(id, SenderFailureStore.exactLong(savedFields, "session"))
                 assertEquals(1793419722366L, SenderFailureStore.exactLong(savedFields, "timestamp_ms"))
                 assertTrue(SenderFailureStore.read(isolated)!!.startsWith("Last sender session failure at "))
-                trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.CLEANUP,
+                trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.CLEANUP,
                     SessionOutcome.Origin.CLEANUP, id, settings, 1793419722999)
                 assertEquals(saved, persistedValues(file)["lastSessionFailure"])
             }
-            trace.firstFailure(IOException("SRT connection closed"), SessionStopTrace.Phase.CLEANUP,
+            trace.firstFailure(IOException("Connection closed"), SessionStopTrace.Phase.CLEANUP,
                 SessionOutcome.Origin.CLEANUP, 764986395015999395L, settings, 1793419723999)
             assertEquals(Long.MAX_VALUE, checkNotNull(persistedValues(file)["lastSessionFailureId"]).toLong())
             assertThrows(IOException::class.java) { Wire.parseJson("""{"session":9223372036854775807}""".toByteArray()) }

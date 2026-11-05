@@ -3,13 +3,10 @@
     <item type="id" name="adb_pairing_code" />
     <item type="id" name="adb_connection_port" />
     <item type="id" name="video_bitrate" />
+    <item type="id" name="maximum_fps" />
     <item type="id" name="capture_display" />
     <item type="id" name="capture_settings_notice" />
     <item type="id" name="capture_settings_scroll" />
-    <item type="id" name="capture_settings_advanced" />
-    <item type="id" name="capture_settings_toggle_advanced" />
-    <item type="id" name="capture_video_options" />
-    <item type="id" name="capture_audio_options" />
     <item type="id" name="capture_audio_enabled" />
     <item type="id" name="capture_audio_source" />
     <item type="id" name="refresh_capture_displays" />
@@ -18,7 +15,6 @@
     <item type="id" name="crop_x" />
     <item type="id" name="crop_y" />
     <item type="id" name="receiver_orientation" />
-    <item type="id" name="media_transport" />
     <item type="id" name="video_codec" />
     <item type="id" name="audio_bitrate" />
     <item type="id" name="audio_codec" />

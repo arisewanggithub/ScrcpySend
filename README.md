@@ -2,8 +2,8 @@
 
 Android screen/audio sender for [ScrcpyRecv](https://github.com/arisewanggithub/ScrcpyRecv)
 on a trusted family LAN. ScrcpySend uses Shizuku and the pinned scrcpy backend
-for capture, with **SRT / fragmented MP4** transport and a **custom TCP**
-compatibility option. These are independent applications, not official scrcpy
+for capture, with **Custom TCP** transport.
+These are independent applications, not official scrcpy
 applications.
 
 The Android application ID is `dev.screencopy.sender`. The on-wire
@@ -16,26 +16,16 @@ separate from application release versions.
   UserService. It verifies shell identity, deploys the checksum-pinned
   **scrcpy-server 3.3.4**, and checks available encoders/displays before Play.
   A first-party native supervisor owns capture-process lifetime and cleanup.
-- SRT uses **libsrt 1.5.7** as transport only. The sender's **Media3 1.11.1**
-  fragmented MP4 muxer produces standard container data; ScrcpyRecv uses
-  Media3 ExoPlayer for extraction, decoding and playback timing.
-- SRT supports **H.264, H.265 or AV1**, with **Opus, AAC-LC or audio off**.
-  PCM is available through custom TCP, not SRT. Unsupported requests fail
+- Custom TCP supports **H.264, H.265 or AV1**, with **RAW PCM, Opus,
+  AAC-LC or audio off**. Unsupported requests fail
   explicitly without changing the user's codec, quality or audio selection.
 - New Custom TCP settings default to **RAW PCM** (48 kHz, stereo, 16-bit
   little-endian; 1.536 Mbps). RAW bypasses audio encoding and has no selectable
-  compression bitrate. New SRT settings default to Opus; SRT/fMP4 cannot carry
-  RAW in this app. Existing saved AAC/Opus selections are preserved: choose
+  compression bitrate. Existing saved AAC/Opus selections are preserved: choose
   `raw` in Settings and Apply, or Reset defaults and Apply, to opt in.
-  The settings editor hides RAW for SRT. Switching from RAW to SRT selects Opus
-  (an existing Opus/AAC choice is retained); switching to Custom TCP restores
-  RAW and selects it. A codec change resets its encoder and codec options.
-  These are visible draft changes saved only with Apply, not runtime fallbacks.
-- The SRT build includes custom TCP compatibility. Local builds enable SRT
-  with `-PsrtTrial=true`; the default build profile is custom TCP.
-- SRT fragments flush on a bounded timer, including static-video/audio-only
-  progress. The configured 100 ms SRT latency is not a measured end-to-end
-  latency guarantee.
+  Custom TCP is fixed, with no transport selector. Saved settings for unavailable
+  transports require opening Settings and explicitly pressing Apply to use
+  Custom TCP; audio choices and other settings are preserved.
 
 See [DESIGN.md](DESIGN.md) for ownership and pipeline details and
 [PROTOCOL.md](PROTOCOL.md) for exact interoperability schemas and bounds.
@@ -43,7 +33,7 @@ See [DESIGN.md](DESIGN.md) for ownership and pipeline details and
 ## Trust and interoperability
 
 Use a reachable **trusted private LAN**. Discovery, control and media do not
-authenticate peers or encrypt the cast. SRT encryption is disabled. Names are
+authenticate peers or encrypt the cast. Names are
 labels, not identities: discovery selects the actual UDP-source IP and TCP
 port, never a name-based redirect. Do not expose the service to the internet
 or assume protection against LAN observers or spoofed discovery.
@@ -79,18 +69,22 @@ root-mode consent; ordinary or unknown UIDs are rejected.
 ### Settings and presentation
 
 Settings cover display, size/crop, orientation, FPS, bitrates, codecs, encoders,
-audio and validated typed options. Apply saves the next request; an active
+and audio. Apply saves the next request; an active
 cast keeps its immutable applied configuration. Settings are disabled during
 startup, playback and teardown. Unsupported selections fail without a hidden
 fallback or automatic preference rewrite.
 
-The editor groups settings into Connection, Video, Screen & layout, Audio and
-Advanced sections. Bold setting labels are separate from smaller explanatory
-text. Advanced codec options are collapsed by default, open automatically when
-saved options exist or option validation fails, and retain their values when
-collapsed. Expansion state survives draft recreation. Audio controls are disabled
+The editor groups settings into Video, Screen & layout and Audio sections.
+Bold setting labels are separate from smaller explanatory text. Advanced codec
+tuning and the raw capability report are not exposed in Settings. Existing saved
+codec options are preserved across Apply and draft recreation; Reset defaults
+clears them when explicitly applied. Audio controls are disabled
 while audio is off, without clearing the selected settings. Apply/Close remain
 outside the scrolling form.
+
+Maximum FPS is a dropdown with 15, 24, 25, 30, 48, 50, 60, 90 and 120 FPS.
+This limits capture, not the display refresh rate. Saved nonstandard rates remain
+visible but require an explicit supported selection before Apply.
 
 Home uses the same heading, label and description styles, with separate cards
 for status notices, Shizuku setup, receivers and the next/active cast settings.
@@ -126,9 +120,9 @@ does not change system power, permission or notification settings.
 ## Build and verification
 
 Use **JDK21**, **Node22**, public **Android SDK36 / Build Tools36.0.0**,
-**NDK27.2.12479018**, and **CMake3.22.1**. The **Gradle9.8.1** wrapper is
+and **NDK27.2.12479018**. The **Gradle9.8.1** wrapper is
 checksum-pinned; **AGP9.4.1** provides built-in Kotlin support, with JVM17
-targets. App, streaming-muxer and libadb explicitly compile against SDK36;
+targets. App and libadb explicitly compile against SDK36;
 the app's minimum SDK is30 and target SDK is35.
 Media3 1.11.1's AAR metadata requires minimum compile SDK36.
 Test fixture/source reads use `Files.readAllBytes` with strict UTF-8 decoding;
@@ -138,17 +132,17 @@ From your checkout, with `JAVA_HOME` set to JDK21:
 
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk" # Or your existing SDK location.
-.\gradlew.bat :app:checkDebugAarMetadata :app:testDebugUnitTest :streaming-muxer:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest -PsrtTrial=true --no-daemon --console plain
+.\gradlew.bat :app:checkDebugAarMetadata :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console plain
 ```
 
-Also validate the default profile with `-PsrtTrial=false`. Override Node with
+Override Node with
 `-PnodeExecutable=C:\path\to\node.exe` or `ORG_GRADLE_PROJECT_nodeExecutable`.
 The debug app is `app\build\outputs\apk\debug\app-debug.apk`.
 The optional `.\tools\interop.ps1 -ReceiverRoot ..\ScrcpyRecv` reads an already
 built receiver classes JAR; `SCRCPY_RECV_ROOT` can override its sibling default.
 
-PR CI checks JVM tests, lint, debug builds and unsigned optimized release assembly
-in both transport profiles. Release assembly runs R8/resource shrinking before
+PR CI checks JVM tests, lint, debug builds and unsigned optimized release assembly.
+Release assembly runs R8/resource shrinking before
 the publisher can use signing secrets; it does not prove runtime compatibility.
 Its disposable Linux **API35 x86_64** emulator runs only
 `dev.scrcpy.update.AppUpdateRemoteUiTest`, not capture/Shizuku/codec acceptance
@@ -156,7 +150,7 @@ tests. APKs are built before booting that emulator. Failure/timeout preserves
 partial instrumentation output, targeted test logcat and the original exit
 status; that emulator job uploads only disposable UI diagnostics. Build and test results
 must come from the current run, not historical totals.
-CI also retains app/streaming-muxer JUnit XML when available for exact failure
+CI also retains app JUnit XML when available for exact failure
 messages and stacks; this does not upload APKs or signing material.
 
 ### Release optimization
@@ -173,22 +167,20 @@ Required backend, supervisor, licenses and source assets,
 ABIs and native link options are unchanged.
 
 For runner validation, in a shell with **no release-signing environment variables
-or Gradle signing properties configured**, run in both transport profiles:
+or Gradle signing properties configured**, run:
 
 ```powershell
 .\tools\test-publication.ps1
-.\gradlew.bat testDebugUnitTest lintDebug assembleDebug :app:lintRelease :app:assembleRelease -PsrtTrial=true -PrequireReleaseSigning=false --no-daemon --console plain
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug :app:lintRelease :app:assembleRelease -PrequireReleaseSigning=false --no-daemon --console plain
 ```
 
-Repeat with `-PsrtTrial=false`. `requireReleaseSigning=false` permits unsigned
+`requireReleaseSigning=false` permits unsigned
 assembly; it does **not** override any supplied signing configuration.
 Inspect `app\build\outputs\apk\release\app-release-unsigned.apk` and
 `app\build\outputs\mapping\release\mapping.txt`: confirm JNI declaring/method
 names, Shizuku constructor, BC mappings/SPIs, manifest components, absence of
-`UpdateTestActivity`, and required assets/resources. Check native JNI exports
-and 16 KiB ELF alignment for all three SRT ABIs. AGP's release CMake variant
-normally uses optimized `RelWithDebInfo`; confirm its generated flags rather
-than forcing global `-O3`/LTO. The supervisor already builds with `-O2`.
+`UpdateTestActivity`, and required assets/resources. Check remaining dependency
+JNI exports and ELF alignment. The supervisor builds with `-O2`.
 
 Unsigned assembly and the existing **debug-only** updater emulator tests are
 not optimized-release smoke tests. The separate `optimized-native-smoke` CI job
@@ -200,13 +192,13 @@ To assemble its safe APK cohort only (no emulator/device operation), from a
 shell with no production signing variables/properties:
 
 ```powershell
-.\gradlew.bat :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PsrtTrial=true -PrequireReleaseSigning=false --no-daemon --console plain
+.\gradlew.bat :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PrequireReleaseSigning=false --no-daemon --console plain
 .\tools\verify-release-smoke-apks.ps1 -App app\build\outputs\apk\release\app-release.apk -TestApk release-check\build\outputs\apk\release\release-check-release.apk -ApplicationId dev.screencopy.sender
 ```
 
 The strict property defaults to false. Smoke mode rejects publication signing,
-any supplied production-signing configuration (even empty/masked paths), and
-non-SRT builds. It changes only the app release signer and conditionally includes
+any supplied production-signing configuration (even empty/masked paths).
+It changes only the app release signer and conditionally includes
 the `release-check` module; the app's normal debug AndroidTest cohort is untouched.
 The standalone `com.android.test` module uses AGP's self-instrumenting mode:
 no app compile dependency/mapping or runtime dependency subtraction. Its Kotlin
@@ -214,35 +206,17 @@ runtime is independently minified/repackaged, not borrowed from the optimized ap
 All app code is invoked through the actual target package's distinct classloader.
 The harness contains no app implementations or native libraries.
 
-**Optimized coverage: eight tests** — three actual SRT JNI loopback/cancellation/
-stale-handle tests, four reflected identity/SPAKE2/Conscrypt/Binder tests, and one
+**Optimized coverage: five tests** — four reflected identity/SPAKE2/Conscrypt/Binder tests and one
 actual manifest-resource/launcher check. CI separately launches the real app
 process without selecting Play and verifies it survives startup.
-**Separate debug coverage: six original `NativeSrtTest` tests**, including the
-high-level muxer/rotation/payload assertions, run afterward on a fresh emulator
-with debug APKs. They are not claimed as optimized coverage. No hardware fixture
-or capture test is selected in either cohort.
+No hardware fixture or capture test is selected.
 The shared transcript checker requires distinct per-test status **0**, one exact
 JUnit OK summary and one final instrumentation code **-1**. Missing/duplicate
 cases, crashes, failures and skips are rejected by executable fixture tests.
-Disposable CI release/debug/update-UI AVD configs use `disk.dataPartition.size=2G`;
+Disposable CI release/update-UI AVD configs use `disk.dataPartition.size=2G`;
 duplicate settings are removed after AVD creation and before startup. This is
 the userdata property, not a global partition flag. CI checks 3 GiB free and
 retains filesystem diagnostics; no SDK/system directories are deleted.
-
-The live Media3 extension substitutes nominal declared-frame-rate duration only
-for a zero final video sample with no explicit EOS timestamp. Upstream emits that
-unknown tail for one/two buffered samples. Earlier positive PTS-derived durations,
-positive duplicated tails, explicit EOS timing, NAL bytes and key flags are
-unchanged; Opus/AAC retain their encoded packet durations. This is a container
-correctness fix surfaced by debug fixtures, not an R8 performance claim.
-The `LiveFragmentTest` regressions check exact 90 kHz durations/tfdt and official
-extraction across two-sample HEVC partial flush/in-band reconfiguration and a
-three-sample positive-tail fragment.
-
-```powershell
-.\gradlew.bat :streaming-muxer:testDebugUnitTest --tests androidx.media3.muxer.LiveFragmentTest --no-daemon --console plain
-```
 
 Only the test module supplies Error Prone annotations 2.41.0 and suppresses the
 compiler-only `javax.lang.model.element.Modifier` reference. No production Kotlin
@@ -316,10 +290,10 @@ licenses and distribution obligations; technical export does not invent or
 require a new original-code license.
 
 Preserve **all** bundled notices and matching complete sources when distributing
-APKs. The dependency graph is not Apache-only: libadb, SPAKE2, SRT, Media3,
+APKs. The dependency graph is not Apache-only: libadb, SPAKE2, Media3,
 Shizuku and other components have their own terms. The APK includes the pinned
-complete SPAKE2 source bundle, and the repository retains modified SRT sources
-and source/build materials. Distributors must actually supply required
+complete SPAKE2 source bundle and source/build materials.
+Distributors must actually supply required
 corresponding-source/recombination materials, not merely reference a build.
 Codec patents, app-store policy and legal/security review remain separate
 from successful tests. See [THIRD_PARTY.md](THIRD_PARTY.md) and

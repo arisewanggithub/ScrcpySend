@@ -36,7 +36,7 @@ Assert ($releaseBlock.Groups['body'].Value -match 'minifyEnabled true' -and $rel
 Assert ($releaseBlock.Groups['body'].Value -match "getDefaultProguardFile\('proguard-android-optimize.txt'\)" -and $releaseBlock.Groups['body'].Value -match "'proguard-rules.pro'") 'Release must register optimized defaults and custom rules'
 $rules = Get-Content -LiteralPath (Join-Path $root 'app/proguard-rules.pro') -Raw
 $consumerRules = Get-Content -LiteralPath (Join-Path $root 'third_party/libadb/consumer-rules.pro') -Raw
-foreach ($type in @('dev.screencopy.sender.SrtNative', 'dev.screencopy.sender.ShellCaptureService',
+foreach ($type in @('dev.screencopy.sender.ShellCaptureService',
     'dev.screencopy.sender.LocalAdb', 'dev.screencopy.sender.Secrets',
     'org.bouncycastle.jcajce.provider.asymmetric.RSA$Mappings',
     'org.bouncycastle.jcajce.provider.asymmetric.X509$Mappings',
@@ -44,7 +44,7 @@ foreach ($type in @('dev.screencopy.sender.SrtNative', 'dev.screencopy.sender.Sh
     'org.bouncycastle.jcajce.provider.asymmetric.x509.CertificateFactory')) {
     Assert ($rules.Contains("class $type {")) "Runtime entry point missing: $type"
 }
-Assert ($rules -match 'native <methods>;' -and $rules -match 'public <init>\(\);') 'JNI and UserService constructor rules missing'
+Assert ($rules -match 'public <init>\(\);') 'UserService constructor rules missing'
 Assert ($consumerRules -match 'class io\.github\.muntashirakon\.crypto\.spake2\.Spake2Context \{\s+native <methods>;') 'SPAKE2 RegisterNatives binding must be retained'
 Assert ((Get-Content (Join-Path $root 'third_party/libadb/build.gradle') -Raw) -match "consumerProguardFiles 'consumer-rules.pro'") 'Vendored libadb consumer rules must propagate'
 Assert (($rules + $consumerRules) -notmatch '(?m)^-(dontobfuscate|dontoptimize)\b|(?m)^-keep[^\r\n]*class [^\r\n]*\*') 'Custom rules must not blanket-keep packages or disable R8'
@@ -53,7 +53,7 @@ Assert (($optionalWarnings -join ',') -ceq 'com.android.org.conscrypt.SSLParamet
 $mainManifest = Get-Content (Join-Path $root 'app/src/main/AndroidManifest.xml') -Raw
 $debugManifest = Get-Content (Join-Path $root 'app/src/debug/AndroidManifest.xml') -Raw
 Assert ($mainManifest -notmatch 'UpdateTestActivity' -and $debugManifest -match 'UpdateTestActivity') 'Updater test Activity must remain debug-only'
-Assert ($workflow -match ':app:assembleRelease -PsrtTrial=\$\{\{ matrix.srt \}\} -PrequireReleaseSigning=false') 'Both profiles need unsigned optimized release compilation before publication'
+Assert ($workflow -match ':app:assembleRelease -PrequireReleaseSigning=false') 'Unsigned optimized release compilation required before publication'
 Assert ($workflow -match 'path: app/build/outputs/mapping/release/mapping.txt') 'Exact signed-release mapping must be retained outside public release assets'
 Assert ($appBuild -match "releaseSmokeValue in \['true', 'false'\]" -and $appBuild -match 'releaseSmokeTest && \(requireReleaseSigning \|\| productionSigningConfigured\)') 'Strict smoke/publication signing exclusion missing'
 Assert ($appBuild -match 'buildTypes.release.signingConfig = signingConfigs.debug') 'Explicit release test signing configuration missing'
@@ -66,7 +66,6 @@ Assert ($module -match 'minifyEnabled true' -and $module -match 'debuggable fals
 Assert ($module -match "testProguardFiles getDefaultProguardFile\('proguard-android-optimize.txt'\), 'proguard-rules.pro'") 'Standalone TestCreationConfig must register optimize defaults/custom metadata and entry rules through testProguardFiles'
 Assert ($module -notmatch '(?m)^\s+proguardFiles\b') 'Ordinary proguardFiles are ignored by standalone test R8'
 Assert ($module -match "implementation 'com.google.errorprone:error_prone_annotations:2.41.0'") 'Harness annotation pin missing'
-Assert ((Get-Content (Join-Path $root 'streaming-muxer/build.gradle') -Raw) -match "compileOnly 'com.google.errorprone:error_prone_annotations:2.41.0'") 'Instrumentation annotation pin must match the vendored muxer compile-only pin'
 Assert ($appBuild -notmatch "(?m)^\s*(implementation|api|compileOnly) ['""]com.google.errorprone:") 'Error Prone annotation fix must remain test-only'
 $testRules = Get-Content (Join-Path $root 'release-check/proguard-rules.pro') -Raw
 $testWarnings = @([regex]::Matches($testRules, '(?m)^-dontwarn ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
@@ -75,8 +74,8 @@ Assert (($rules + $consumerRules) -notmatch 'javax.lang.model') 'Compiler model 
 Assert ($testRules -match '(?m)^-repackageclasses dev.scrcpy.releasecheck.internal' -and $rules -notmatch 'keep[^\r\n]*kotlin') 'Harness runtime must be isolated without production Kotlin keeps'
 Assert ($workflow -match '-PrequireReleaseSigning=true -PreleaseSmokeTest=false') 'Publisher must explicitly disable smoke signing'
 $smokeScript = Get-Content (Join-Path $PSScriptRoot 'run-release-smoke.sh') -Raw
-Assert ($smokeScript -match 'NativeSrtCheck,dev.scrcpy.releasecheck.SourceCryptoCheck,dev.scrcpy.releasecheck.TargetResourcesCheck' -and $smokeScript -notmatch 'AppUpdateRemoteUiTest|ShizukuDeviceTest|connectedAndroidTest') 'Release smoke must select only standalone checks'
-Assert ($smokeScript -match 'bash tools/check-instrumentation-result.sh' -and $smokeScript -match 'expected=8') 'Smoke must use the tested result checker and exact count'
+Assert ($smokeScript -match 'classes=dev.scrcpy.releasecheck.SourceCryptoCheck,dev.scrcpy.releasecheck.TargetResourcesCheck' -and $smokeScript -notmatch 'AppUpdateRemoteUiTest|ShizukuDeviceTest|connectedAndroidTest') 'Release smoke must select only standalone checks'
+Assert ($smokeScript -match 'bash tools/check-instrumentation-result.sh' -and $smokeScript -match 'expected=5') 'Smoke must use the tested result checker and exact count'
 $resultChecker = Get-Content (Join-Path $PSScriptRoot 'check-instrumentation-result.sh') -Raw
 Assert ($resultChecker.Contains('^INSTRUMENTATION_STATUS_CODE: 0$') -and $resultChecker.Contains('^INSTRUMENTATION_CODE: -1$') -and $resultChecker -match 'INSTRUMENTATION_STATUS_CODE: -\[234\]') 'Per-test success is 0; final success is -1; failures/skips must remain rejected'
 $parserBash = if ($env:OS -eq 'Windows_NT') {
@@ -89,19 +88,13 @@ Assert ($LASTEXITCODE -eq 0) 'CI AVD userdata policy fixtures failed'
 Assert ($workflow -match 'bash tools/set-ci-avd-userdata.sh "\$ANDROID_AVD_HOME/update-ui.avd/config.ini"') 'Updater UI AVD must also receive the bounded userdata config'
 Assert ($workflow.IndexOf('create avd --force --name update-ui') -lt $workflow.IndexOf('bash tools/set-ci-avd-userdata.sh "$ANDROID_AVD_HOME/update-ui.avd/config.ini"')) 'Updater userdata config must follow its AVD creation'
 Assert ($smokeScript.IndexOf('create avd') -lt $smokeScript.IndexOf('bash tools/set-ci-avd-userdata.sh') -and $smokeScript.IndexOf('bash tools/set-ci-avd-userdata.sh') -lt $smokeScript.IndexOf('"$ANDROID_HOME/emulator/emulator" -avd')) 'CI userdata sizing must precede emulator launch and follow AVD creation'
-$nativeCheck = Get-Content (Join-Path $root 'release-check/src/main/java/dev/scrcpy/releasecheck/NativeSrtCheck.kt') -Raw
-Assert ($nativeCheck -match 'does not match the accepted control session' -and $nativeCheck -match 'has not connected' -and $nativeCheck -notmatch 'assertThrows\(ExecutionException') 'Wrong-SID proof must validate listener rejection/unusable I/O, not race-dependent caller failure'
 $smokeTestCount = 0
 foreach ($file in (Get-ChildItem (Join-Path $root 'release-check/src/main') -Recurse -File -Filter '*.kt')) {
     $content = Get-Content $file.FullName -Raw
     Assert ($content -notmatch 'import (dev\.screencopy\.sender|org\.screencopy\.receiver|org\.conscrypt|org\.bouncycastle|io\.github\.muntashirakon)') 'Harness must reflect target code, never compile app implementation'
     $smokeTestCount += [regex]::Matches($content, '@Test\s+fun\s+').Count
 }
-Assert ($smokeTestCount -eq 8) 'Standalone Source cohort must have exactly eight tests'
-$debugDriver = Get-Content (Join-Path $PSScriptRoot 'run-debug-native-fixtures.sh') -Raw
-$debugTests = Get-Content (Join-Path $root 'app/src/androidTest/java/dev/screencopy/sender/NativeSrtTest.kt') -Raw
-Assert ($debugDriver -match 'expected=6' -and [regex]::Matches($debugTests, '@Test\s+fun\s+').Count -eq 6 -and $debugDriver -match '-e class dev.screencopy.sender.NativeSrtTest ') 'Original six debug-native fixture tests must retain their separate exact cohort'
-Assert ($debugDriver -match 'bash tools/check-instrumentation-result.sh') 'Debug-native results must use the same tested success-code parser'
+Assert ($smokeTestCount -eq 5) 'Standalone Source cohort must have exactly five tests'
 $runner = Get-Content (Join-Path $root 'release-check/src/main/java/dev/scrcpy/releasecheck/ReleaseCheckRunner.kt') -Raw
 $target = Get-Content (Join-Path $root 'release-check/src/main/java/dev/scrcpy/releasecheck/TargetApp.kt') -Raw
 Assert ($runner -match 'releaseSmoke' -and $runner -match 'Build.VERSION.SDK_INT == 35' -and $target -match 'FLAG_DEBUGGABLE' -and $target -match 'loader !== harness.classLoader') 'Independent target loader and emulator/non-debuggable guards required'
@@ -110,7 +103,6 @@ $smokeJob = [regex]::Match($workflow, '(?ms)^  optimized-native-smoke:.*?(?=^  p
 Assert ($smokeJob -match 'releaseSmokeTest=true' -and $smokeJob -notmatch 'secrets\.|publication\.keystore|release upload') 'Smoke job must not use production signing or publication'
 Assert ($smokeJob -match ':release-check:assembleRelease' -and $smokeJob -notmatch ':app:assembleReleaseAndroidTest') 'Optimized CI must build the standalone APK, not the retired shared-runtime test APK'
 Assert ($workflow -notmatch 'pull_request_target|connectedAndroidTest|adb connect') 'Unsafe CI trigger/device test'
-Assert ($workflow -match "srt: \['false', 'true'\]") 'Both transport build modes must be checked'
 Assert ($workflow -match 'requireReleaseSigning=true') 'Publication signing guard missing'
 Assert ($workflow -match '-e class dev\.scrcpy\.update\.AppUpdateRemoteUiTest ') 'Only the agreed remote UI instrumentation class may run'
 Assert ($workflow -match '(?m)^  publish:\r?\n    needs: \[verify-validation\]') 'Release must depend on verified PR evidence, not repeat PR jobs'
@@ -269,7 +261,7 @@ try {
 }
 & $parserBash --noprofile --norc (Join-Path $PSScriptRoot 'test-stop-ci-emulator.sh').Replace('\', '/')
 Assert ($LASTEXITCODE -eq 0) 'Owned emulator shutdown must be bounded and regression tested'
-foreach ($name in @('run-release-smoke.sh', 'run-debug-native-fixtures.sh')) {
+foreach ($name in @('run-release-smoke.sh')) {
     $cleanupScript = Get-Content (Join-Path $PSScriptRoot $name) -Raw
     Assert ($cleanupScript -match 'source tools/stop-ci-emulator.sh' -and $cleanupScript -match 'stop_ci_emulator "\$emulator_pid"') 'Disposable emulators must use owned, bounded shutdown'
     Assert ($cleanupScript -notmatch 'wait "\$emulator_pid"') 'Unbounded emulator wait must not return'

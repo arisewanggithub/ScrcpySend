@@ -10,7 +10,6 @@ dependencyResolutionManagement {
 rootProject.name = "ScreenCopySender"
 include(":app")
 include(":libadb")
-include(":streaming-muxer")
 project(":libadb").projectDir = file("third_party/libadb")
 if (providers.gradleProperty('releaseSmokeTest').getOrElse('false') == 'true') {
     include(':release-check')

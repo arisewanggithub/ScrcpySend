@@ -16,10 +16,6 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        srt: ['false', 'true']
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -37,24 +33,23 @@ jobs:
       - name: Install pinned Android tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
       - name: JVM tests, lint and debug build (no devices)
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest lintDebug assembleDebug -PsrtTrial=${{ matrix.srt }} -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew testDebugUnitTest lintDebug assembleDebug -PnodeExecutable="$(command -v node)" --no-daemon --console plain
       - name: Compile unsigned optimized release (R8 and resource shrinking)
         run: |
-          ./gradlew :app:assembleRelease -PsrtTrial=${{ matrix.srt }} -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
       - name: Retain JVM test XML for diagnosis
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ScrcpySend-junit-srt-${{ matrix.srt }}-${{ github.run_attempt }}
+          name: ScrcpySend-junit-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: ignore
           path: |
             app/build/test-results/testDebugUnitTest/TEST-*.xml
-            streaming-muxer/build/test-results/testDebugUnitTest/TEST-*.xml
   update-ui:
     if: github.event_name == 'pull_request'
     name: Remote update UI only (ephemeral API35 emulator)
@@ -77,7 +72,7 @@ jobs:
       - name: Install pinned SDK and isolated emulator
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
           mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name update-ui --package "system-images;android-35;google_apis;x86_64"
           bash tools/set-ci-avd-userdata.sh "$ANDROID_AVD_HOME/update-ui.avd/config.ini"
@@ -85,7 +80,7 @@ jobs:
       - name: Build unsigned-development app and UI test APKs
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PsrtTrial=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PnodeExecutable="$(command -v node)" --no-daemon --console plain
       - name: Run only AppUpdateRemoteUiTest on disposable emulator
         run: |
           set -euo pipefail
@@ -179,20 +174,15 @@ jobs:
       - name: Install pinned tools and disposable emulator
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
           sudo chmod 666 /dev/kvm
       - name: Build optimized non-debuggable app and safe release test APK
         run: |
           chmod +x gradlew
           pwsh -NoProfile -File tools/verify-release-smoke-apks.ps1 -SelfTest
-          ./gradlew :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PsrtTrial=true -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease :release-check:assembleRelease -PreleaseSmokeTest=true -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
       - name: Run only safe optimized-release tests
         run: bash tools/run-release-smoke.sh
-      - name: Build original debug native fixtures (separate coverage)
-        run: |
-          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PreleaseSmokeTest=false -PsrtTrial=true -PrequireReleaseSigning=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
-      - name: Run original NativeSrtTest only on a fresh debug fixture emulator
-        run: bash tools/run-debug-native-fixtures.sh
       - name: Stop disposable release-smoke emulator
         if: always()
         run: |
@@ -212,11 +202,6 @@ jobs:
             publication-output/release-smoke/exit-status.txt
             publication-output/release-smoke/app-launch.txt
             publication-output/release-smoke/disk-space.txt
-            publication-output/debug-native/instrumentation-result.txt
-            publication-output/debug-native/test-logcat.txt
-            publication-output/debug-native/emulator.log
-            publication-output/debug-native/exit-status.txt
-            publication-output/debug-native/disk-space.txt
             app/build/outputs/mapping/release/mapping.txt
             release-check/build/outputs/mapping/release/mapping.txt
   record-validation:
@@ -328,13 +313,13 @@ jobs:
       - name: Install pinned Android tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
-      - name: Build signed SRT and custom TCP release
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+      - name: Build signed Custom TCP release
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || { echo "::error::Signed checkout differs from validated release revision"; exit 1; }
           chmod +x gradlew
-          ./gradlew :app:assembleRelease -PsrtTrial=true -PrequireReleaseSigning=true -PreleaseSmokeTest=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
+          ./gradlew :app:assembleRelease -PrequireReleaseSigning=true -PreleaseSmokeTest=false -PnodeExecutable="$(command -v node)" --no-daemon --console plain
       - name: Retain exact signed-release R8 mapping (not a release asset)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -353,7 +338,7 @@ jobs:
           set -euo pipefail
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-              gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes "Signed SRT/custom TCP release. See README for signing continuity and source licenses."
+              gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes "Signed Custom TCP release. See README for signing continuity and source licenses."
             else
               gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes "Opt-in development prerelease; excluded from stable automatic updates." --prerelease --latest=false
             fi

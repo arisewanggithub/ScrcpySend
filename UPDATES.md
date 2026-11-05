@@ -110,8 +110,8 @@ checks do not require binary publication approval.
 
 ### PR validation versus publication
 
-The workflow separates jobs by event. PRs alone run the full default/SRT JVM,
-lint, debug, remote UI (14 tests), optimized runtime and sender container suites.
+The workflow separates jobs by event. PRs alone run the JVM,
+lint, debug, remote UI (14 tests) and optimized runtime suites.
 After all checks pass, **Validated PR source proof** records the PR head and
 tested merge tree as a small 90-day Actions artifact. This is a required merge
 check alongside the four existing validation checks.
@@ -162,9 +162,8 @@ configuration or `requireReleaseSigning=true` conflicts with smoke mode.
 The publisher explicitly uses smoke=false and rebuilds with the user-configured
 permanent signer; smoke APKs, debug keystores and AVD storage are never artifacts.
 
-The standalone cohort has **eight tests**: three raw native SRT loopback/exact-byte,
-cancel/close/backpressure/stream-ID/stale-handle cases, four Source reflection/
-crypto cases, and one manifest-resource/launcher check. They load actual app
+The standalone cohort has **five tests**: four Source reflection/
+crypto cases and one manifest-resource/launcher check. They load actual app
 classes with the target package context/classloader, never compile app code.
 The Source cases construct the Shizuku Binder without attach/deploy/destroy,
 run `LocalAdb`'s BC identity/signature/certificate round trip with UUID storage
@@ -172,9 +171,6 @@ and AndroidKeyStore aliases owned by the **harness UID**, perform a synthetic
 SPAKE2 native exchange, and load bundled Conscrypt native/provider/exporter APIs.
 No target-app private preferences/identity are read or written.
 CI also launches the real app process separately without selecting Play.
-Wrong-stream-ID validation requires the listener's specific control-session
-rejection and no usable listener read/write connection. Caller transport connect
-may finish before that application-level check; its success is not acceptance.
 Conscrypt's established-socket TLS exporter and real Shizuku/scrcpy/supervisor
 deployment are **not** exercised by this smoke.
 
@@ -192,9 +188,6 @@ self-instrumenting mode avoids app dependency subtraction and app mapping; no
 production stdlib functions are retained merely for tests. The previous shared
 AndroidTest harness crashed before executing tests and is retired; its former
 11-test selection is not claimed as successful optimized coverage.
-The six original debug `NativeSrtTest` cases run as a separate fresh-emulator
-phase after successful optimized checks. Their muxer/rotation/byte-generation
-assertions remain debug coverage, not optimized-muxer proof.
 The existing `LocalAdb` identity constructor/accessors and the explicit isolated
 `Secrets` constructor are retained narrowly because the separate test APK must
 call them after optimization. No new production hook, backend path, network

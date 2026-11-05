@@ -48,7 +48,7 @@ internal object Av1Configuration {
         val obu = sequence.single()
         val parsed = try { ObuParser.SequenceHeader.parse(obu) }
         catch (e: RuntimeException) { throw IOException("CAPTURE_FAILED: malformed AV1 sequence header", e) }
-        if (parsed == null) throw IOException("UNSUPPORTED_CONFIG: AV1 sequence features unsupported by Media3 muxer")
+        if (parsed == null) throw IOException("UNSUPPORTED_CONFIG: unsupported AV1 sequence features")
         val data = ByteArray(obu.payload.remaining()).also { obu.payload.duplicate().get(it) }
         val bits = CodecBits(data)
         bits.skip(4)
@@ -76,19 +76,4 @@ internal object Av1Configuration {
         return width to height
     }
 
-    fun sequence(bytes: ByteArray): ByteArray {
-        val headers = obus(bytes).filter { it.type == ObuParser.OBU_SEQUENCE_HEADER }
-        if (headers.size != 1) throw IOException("UNSUPPORTED_CONFIG: AV1 requires one sequence header")
-        return ByteArray(headers.single().payload.remaining()).also { headers.single().payload.duplicate().get(it) }
-    }
-
-    fun firstSample(config: ByteArray, sample: ByteArray): ByteArray {
-        val obus = obus(sample)
-        if (obus.any { it.type == ObuParser.OBU_SEQUENCE_HEADER }) return sample
-        val prefix = try { androidx.media3.muxer.StreamingCodecConfig.av1ConfigObus(config) }
-        catch (e: RuntimeException) { throw IOException("UNSUPPORTED_CONFIG: AV1 configuration rejected by official muxer", e) }
-        val delimiters = obus.takeWhile { it.type == ObuParser.OBU_TEMPORAL_DELIMITER }
-        val offset = delimiters.sumOf { it.header.remaining() + it.payload.remaining() }
-        return sample.copyOfRange(0, offset) + prefix + sample.copyOfRange(offset, sample.size)
-    }
 }

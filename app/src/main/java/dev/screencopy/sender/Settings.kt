@@ -18,29 +18,16 @@ class Settings {
     var cropX = 0
     var cropY = 0
     var audio = true
-    // Transport defaults apply only until a codec is explicitly selected or loaded.
-    private var selectedAudioCodec: String? = null
-    var audioCodec: String
-        get() = selectedAudioCodec ?: audioCodecs(mediaTransportMode).first()
-        set(value) { selectedAudioCodec = value }
+    var audioCodec = "raw"
     var audioEncoder = ""
     var audioSource = "output"
     var audioOptions = ""
     var audioBitrate = 192_000
 
     fun validate() {
-        require(mediaTransportMode in setOf("custom", "srt"), "Saved media transport is unavailable. Choose Custom TCP or SRT in Settings and explicitly Apply.")
-        if (mediaTransportMode == "srt") {
-            require(videoCodec in setOf("h264", "h265", "av1"), "SRT supports H.264, H.265 or AV1")
-            require(!audio || audioCodec in audioCodecs("srt"), "SRT requires Opus, AAC-LC or audio disabled; PCM is unsupported")
-            if (audio && audioCodec == "aac") {
-                val profile = audioOptions.split(',').firstOrNull { it.substringBefore('=').substringBefore(':') == "aac-profile" }
-                require(profile == null || profile.substringBefore('=') in setOf("aac-profile", "aac-profile:int") &&
-                    profile.substringAfter('=') == "2", "SRT AAC requires explicit integer AAC-LC aac-profile=2; no profile substitution")
-            }
-        }
+        require(mediaTransportMode == "custom", "Saved media transport is unavailable. Open Settings and Apply to use Custom TCP; other settings are preserved.")
         require(videoCodec in setOf("h264", "h265", "av1"), "Unknown video codec")
-        require(audioCodec in audioCodecs("custom"), "Unknown audio codec")
+        require(audioCodec in audioCodecs(), "Unknown audio codec")
         require(audioSource in setOf("output", "playback", "mic"), "Unknown audio source")
         require(orientation in setOf("0", "90", "180", "270", "@0", "@90", "@180", "@270"), "Invalid capture orientation")
         require(receiverOrientation in setOf("auto", "landscape", "portrait"), "Invalid receiver orientation")
@@ -78,13 +65,7 @@ class Settings {
     }
 
     companion object {
-        fun audioCodecs(transport: String): List<String> =
-            if (transport == "srt") listOf("opus", "aac") else listOf("raw", "opus", "aac")
-
-        fun audioCodecOnTransportChange(transport: String, previous: String): String {
-            val supported = audioCodecs(transport)
-            return if (transport == "srt" && previous in supported) previous else supported.first()
-        }
+        fun audioCodecs(): List<String> = listOf("raw", "opus", "aac")
 
         private val name = Regex("[A-Za-z0-9._-]{1,160}")
         fun require(valid: Boolean, message: String) { if (!valid) throw IllegalArgumentException(message) }

@@ -40,9 +40,6 @@ class SenderSession internal constructor(
     @Volatile private var link: ReceiverLink? = null
     @Volatile private var privileged: CaptureBridge? = null
     private var backend: CaptureBackend? = null
-    @Volatile private var srt: SrtSender? = null
-    @Volatile private var srtReady = false
-    private val isSrt get() = settings.mediaTransportMode == "srt"
     private val stopping get() = outcome.stopping
     @Volatile private var requestSent = false
     @Volatile private var acceptedSession = false
@@ -143,10 +140,6 @@ class SenderSession internal constructor(
             lastIncoming = now()
             phase("Negotiating", SessionStopTrace.Phase.NEGOTIATING)
             val request = settings.request().also { it.remove("mediaTransportMode") }
-            if (isSrt) {
-                val server = SrtSender(connected.localAddress, connected.peerAddress, session, settings, diagnostic).also { srt = it }
-                request.put("mediaTransport", SrtTransport.descriptor(connected.localAddress, server.port, session))
-            }
             connected.send(Wire.control(Wire.SESSION_REQUEST, session, request))
             worker("receiver-write", ::writeLoop)
             requestSent = true
@@ -158,7 +151,8 @@ class SenderSession internal constructor(
                 throw IOException("${Json.string(accepted.json(), "code")}: ${Json.string(accepted.json(), "message")}")
             check()
             if (accepted.type != Wire.SESSION_ACCEPT) throw IOException("PROTOCOL: expected SESSION_ACCEPT")
-            if (isSrt) SrtTransport.requireAccepted(accepted.json())
+            if (accepted.json().has("mediaTransport"))
+                throw IOException("UNSUPPORTED_CONFIG: receiver selected an unavailable media transport")
             val tracks = accepted.json().getJSONArray("tracks")
             if (tracks.length() != (if (settings.audio) 2 else 1) || tracks.get(0) !is Int || tracks.getInt(0) != 1 ||
                 settings.audio && (tracks.get(1) !is Int || tracks.getInt(1) != 2))
@@ -168,8 +162,7 @@ class SenderSession internal constructor(
             phase("StartingCapture", SessionStopTrace.Phase.CAPTURE_START)
             capture.start(settings, session, this)
             while (!stopping && outcome.failure == null) {
-                if (if (isSrt) srtReady else mux.allReady()) phaseDeadline = 0
-                srt?.checkHealth()
+                if (mux.allReady()) phaseDeadline = 0
                 Thread.sleep(100)
             }
         } catch (e: Exception) {
@@ -180,8 +173,6 @@ class SenderSession internal constructor(
             phaseDeadline = now() + 2_000_000_000L; status("Stopping")
             trace.mark(SessionStopTrace.Stage.CLOSING)
             queueTerminal()
-            // Cancel native media before capture cleanup waits for its encoded readers.
-            try { srt?.close() } catch (e: Exception) { fail(e, SessionOutcome.Origin.CLEANUP) }
             try { backend?.close() } catch (e: Exception) { fail(e, SessionOutcome.Origin.CLEANUP) }
             if (requestSent) try { terminalSent.await(500, TimeUnit.MILLISECONDS) }
             catch (e: InterruptedException) { Thread.currentThread().interrupt(); fail(e, SessionOutcome.Origin.CLEANUP) }
@@ -255,7 +246,6 @@ class SenderSession internal constructor(
                 val json = message.json()
                 when (message.type) {
                     Wire.STREAM_READY -> {
-                        if (isSrt) throw IOException("PROTOCOL: SRT transport does not use STREAM_READY")
                         if (!Json.bool(json, "ok")) throw IOException("DECODER_FAILED: track not ready")
                         mux.ready(message.track, message.generation)
                         if (mux.allReady() && !stopping && !closing && outcome.failure == null) {
@@ -274,13 +264,7 @@ class SenderSession internal constructor(
                     }
                     Wire.PONG -> Json.integer(json, "nonce")
                     Wire.STATUS -> {
-                        val state = Json.string(json, "state"); Json.string(json, "message")
-                        if (isSrt && state == "srt-playing" &&
-                            !stopping && !closing && outcome.failure == null) {
-                            phaseDeadline = 0
-                            srtReady = true; playing = true
-                            trace.phase(SessionStopTrace.Phase.STREAMING); status("Streaming")
-                        }
+                        Json.string(json, "state"); Json.string(json, "message")
                     }
                     Wire.ERROR -> {
                         val code = Json.string(json, "code"); val text = Json.string(json, "message")
@@ -326,14 +310,12 @@ class SenderSession internal constructor(
     }
     override fun config(track: Int, generation: Int, config: JSONObject) {
         check()
-        if (isSrt) checkNotNull(srt).config(track, generation, config)
-        else mux.offer(Wire.config(session, track, generation, config))
-        if (!isSrt || !srtReady) status(if (track == 1) "Preparing video" else "Preparing audio")
+        mux.offer(Wire.config(session, track, generation, config))
+        status(if (track == 1) "Preparing video" else "Preparing audio")
     }
     override fun packet(packet: Wire.Message) {
         check()
-        if (isSrt) checkNotNull(srt).packet(packet)
-        else mux.offer(packet)
+        mux.offer(packet)
     }
 
     companion object {
