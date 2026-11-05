@@ -4,6 +4,7 @@ import android.content.Context
 import java.net.ServerSocket
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -21,9 +22,10 @@ class SessionHeartbeatTest {
         val restartAttempted = CountDownLatch(1)
         val received = CountDownLatch(2)
         val messages = java.util.concurrent.CopyOnWriteArrayList<Wire.Message>()
-        ServerSocket(0).use { server ->
+        val executor = Executors.newFixedThreadPool(4)
+        try { ServerSocket(0).use { server ->
             server.soTimeout = 10_000
-            val peer = CompletableFuture.runAsync {
+            val peer = CompletableFuture.runAsync({
                 server.accept().use { socket ->
                     socket.soTimeout = 10_000
                     assertEquals(Wire.HELLO, Wire.read(socket.inputStream).type)
@@ -51,7 +53,7 @@ class SessionHeartbeatTest {
                         }
                     }
                 }
-            }
+            }, executor)
             ReceiverLink(ReceiverTarget("127.0.0.1", server.localPort)).use { link ->
                 link.connect()
                 field("link").set(sender, link)
@@ -60,20 +62,20 @@ class SessionHeartbeatTest {
                 field("lastIncoming").setLong(sender, System.nanoTime())
                 val read = SenderSession::class.java.getDeclaredMethod("readLoop").apply { isAccessible = true }
                 val write = SenderSession::class.java.getDeclaredMethod("writeLoop").apply { isAccessible = true }
-                val reader = CompletableFuture.runAsync { read.invoke(sender) }
-                val writer = CompletableFuture.runAsync { write.invoke(sender) }
+                val reader = CompletableFuture.runAsync({ read.invoke(sender) }, executor)
+                val writer = CompletableFuture.runAsync({ write.invoke(sender) }, executor)
                 try {
                     val bytes = WireTest.unhex("000000016588")
                     sender.config(1, 1, CodecConfig.video("h264", BackendTest().sps(640, 480)))
                     sender.packet(Wire.Message(Wire.VIDEO_FRAME, 1, id, 1, 1, 1_000_000, bytes))
-                    val restart = CompletableFuture.runAsync {
+                    val restart = CompletableFuture.runAsync({
                         val started = System.nanoTime()
                         restartAttempted.countDown()
                         sender.awaitVideoDrain()
                         assertTrue(System.nanoTime() - started >= TimeUnit.MILLISECONDS.toNanos(700))
                         sender.config(1, 2, CodecConfig.video("h264", BackendTest().sps(480, 640)))
                         sender.packet(Wire.Message(Wire.VIDEO_FRAME, 1, id, 1, 2, 1_726_606, bytes))
-                    }
+                    }, executor)
                     restart.get(5, TimeUnit.SECONDS)
                     assertTrue(received.await(5, TimeUnit.SECONDS))
                     assertEquals(listOf(Wire.STREAM_CONFIG, Wire.VIDEO_FRAME, Wire.STREAM_CONFIG, Wire.VIDEO_FRAME),
@@ -89,7 +91,7 @@ class SessionHeartbeatTest {
                     finally { link.close(); reader.get(2, TimeUnit.SECONDS) }
                 }
             }
-        }
+        } } finally { executor.shutdownNow() }
     }
 
     @Test fun continuousMediaStaysConnectedBeyondSocketTimeoutWhenPeerOnlyRepliesToProbes() {
