@@ -20,7 +20,7 @@ class Settings {
     var audio = true
     var audioCodec = "raw"
     var audioEncoder = ""
-    var audioSource = "output"
+    var audioSource = "playback"
     var audioOptions = ""
     var audioBitrate = 192_000
 

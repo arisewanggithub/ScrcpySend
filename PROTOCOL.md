@@ -7,8 +7,8 @@ credential issuance, saved trust or revocation. Anyone on the LAN can observe or
 forge discovery/session/media traffic. Use ONLY a trusted private family LAN.
 No human session code, pairing code, peer credential or comparison confirmation
 exists. Internal cast session IDs, message error `code` fields, track IDs and
-generations identify internal resources. Sender capture uses Shizuku; receiver has no
-dependency on sender's privileged backend.
+generations identify internal resources. Sender capture uses Android MediaProjection;
+receiver has no dependency on the sender's capture implementation.
 
 ## Listener selection and discovery
 
@@ -64,6 +64,13 @@ UNSUPPORTED_CONFIG, with matching session. Receiver can reply REJECT BUSY at
 HELLO/session0 too. Capture starts ONLY
 after SESSION_ACCEPT. Enabled audio cannot silently disappear.
 
+An optional HELLO boolean `videoRotation` negotiates per-picture presentation
+rotation. The sender requests it with `true`; a supporting receiver echoes
+`true`. Absent/false retains legacy dimension-changing video, with zero rotation
+bits. Present non-boolean values are protocol errors. Both peers must agree
+before nonzero rotation bits are sent. Discovery and application versions do
+not imply support.
+
 Incorrect version fields fail VERSION immediately. TLS ClientHello fails magic immediately.
 Do not wait for a complete40-byte header to reject invalid magic/version. Setup and
 individual startup phases10s overall (trickled reads do not extend); writer10s.
@@ -85,7 +92,7 @@ Exactly40-byte header, big endian:
 |4|u16 version **3**|
 |6|u16 type|
 |8|u32 payload length excluding header|
-|12|u32 flags:1 video keyframe, otherwise0|
+|12|u32 flags:bit0 video keyframe; negotiated bits1-2 clockwise quarter-turns|
 |16|u64 session, positive signed64 range;0 before SESSION_REQUEST|
 |24|u32 track0 control,1 video,2 audio|
 |28|u32 generation,1..2147483647 on track messages,0 control|
@@ -97,7 +104,20 @@ Types:1 HELLO, **2 reserved/reject**,3 SESSION_REQUEST,4 SESSION_ACCEPT,5 REJECT
 sender sends REQUEST/CONFIG/media, receiver sends ACCEPT/REJECT/READY; other
 status/liveness/stop messages bidirectional. Only CONFIG/READY/media have
 nonzero track/generation AND require session>0. Video track1; audio track2.
-Media PTS>=0, config/control PTS-1. Keyframe flag only VIDEO_FRAME. Validate
+Media PTS>=0, config/control PTS-1. Flags are zero except on VIDEO_FRAME:
+bit0 indicates keyframe; with negotiated `videoRotation`, bits1-2 encode
+0/90/180/270 degrees clockwise (`flags >> 1` times 90). All other bits are
+reserved. Without negotiation rotation bits must be zero. Rotation belongs
+to that encoded picture's PTS, not control arrival time. Decode the same coded
+width/height/CSD and rotate only when presenting that decoded picture, including
+latest-picture catch-up. Rotation alone does not change generation or require
+STREAM_CONFIG/STREAM_READY. Natural-coordinate crops and encoded dimensions
+remain fixed; manual capture-orientation overrides become presentation rotation.
+For negotiated sessions, receiverOrientation `auto` follows the displayed video
+aspect (coded dimensions plus picture rotation). Explicit portrait/landscape
+still wins. Legacy sessions retain OS-policy Auto behavior. This is scoped to
+the receiver Activity; teardown restores the previous orientation policy.
+Validate
 header fields and bounds BEFORE allocation: controls/config<=65536, video<=4194304,
 audio<=262144; no zero-length media. Unknown version/type/flags/invalid track
 fatal. Exact reads across segmentation, preserve coalesced frames. EOF partway
@@ -124,7 +144,7 @@ not hardware-accelerated. This sender policy does not restrict receiver decoders
 Bitrates bits/s; maxSize0 unlimited or<=16384; maxFps1..240; displayId>=0.
 Orientation0/90/180/270 or @0/@90/@180/@270; crop null or
 `{"width":1280,"height":720,"x":0,"y":0}` natural-display coordinates, positive
-size/nonnegative offsets. codecOptions validated scrcpy typed numeric list,
+size/nonnegative offsets. codecOptions are validated typed numeric MediaCodec options,
 never arbitrary shell text. Receiver evaluates decodability, not encoder names.
 No substitutions, B-frames forbidden. Raw ignores bitrate (field still positive).
 Defaults H264 + enabled Opus192000; no sender Opus encoder is an explicit error.
@@ -183,10 +203,9 @@ codecDelayNs=floor(preSkip*1e9/48000), preroll80000000. Receiver applies preSkip
 once per generation and output gain. Each AUDIO_PACKET one raw Opus packet.
 PTS names the source-clock observation for the decoded packet before preSkip;
 receiver trims startup samples. Opus packet/decode order is arrival order, not
-PTS order: the pinned scrcpy encoder may reconstruct output PTS independently
-of its monotonic input timestamps and produce nonnegative reversals.
-See pinned [AudioEncoder.fixTimestamp](https://github.com/Genymobile/scrcpy/blob/v3.3.4/server/src/main/java/com/genymobile/scrcpy/audio/AudioEncoder.java#L134-L150)
-and desktop [audio_regulator.c](https://github.com/Genymobile/scrcpy/blob/v3.3.4/app/src/audio_regulator.c#L140-L172).
+PTS order: compatibility permits nonnegative Opus timestamp reversals.
+The MediaProjection sender preserves Android MediaCodec output timestamps and
+does not reorder packets or independently zero track clocks.
 AAC-LC48k stereo config csd[0] AudioSpecificConfig, raw AU packets, no ADTS.
 PCM config `{"codec":"raw","sampleRate":48000,"channels":2,"csd":[],"sampleFormat":"s16le"}`;
 packets interleaved signed16LE, lengths divisible by4.
@@ -197,7 +216,7 @@ until ALL enabled tracks initially ready, timeout10s. New track generations
 pause that track until READY; other tracks may continue. Reject stale generations.
 Config packets never masquerade as media. Decoder failure explicit.
 
-PTS scrcpy shared MediaCodec capture-clock microseconds, not Unix time, not
+PTS use the shared monotonic capture-clock microseconds, not Unix time, not
 separately zeroed tracks; may start large. Video, AAC and PCM PTS are
 nondecreasing per generation, equal allowed. Opus source PTS must be nonnegative
 but may decrease anywhere within a generation, without a magnitude/startup

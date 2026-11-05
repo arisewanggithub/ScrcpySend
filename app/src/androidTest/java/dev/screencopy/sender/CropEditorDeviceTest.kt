@@ -136,7 +136,7 @@ class CropEditorDeviceTest {
             f.generation++
             stale(Result.success(f.inventory))
             assertTrue(f.applyButton().isEnabled)
-            assertTrue(f.notice().contains("Shizuku changed"))
+            assertTrue(f.notice().contains("Capture capabilities changed"))
             assertTrue(f.notice().contains("Retry"))
             f.apply()
             assertTrue(f.editor.showing)
@@ -216,7 +216,7 @@ class CropEditorDeviceTest {
         init {
             main {
                 editor = CaptureSettingsEditor(activity, store,
-                    { ShizukuSetup.Snapshot(generation = generation, state = ShizukuState.READY,
+                    { ProjectionInventory.Snapshot(generation = generation,
                         capabilities = inventory.report() + "\n" + fixtureHardware()) },
                     { active }, {}, if (refresh) { callback -> response = callback } else null)
                 dialog = editor.show()

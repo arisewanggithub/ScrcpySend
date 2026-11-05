@@ -4,7 +4,6 @@ import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -51,7 +50,7 @@ object Wire {
         val media = type == VIDEO_FRAME || type == AUDIO_PACKET
         val max = when (type) { VIDEO_FRAME -> MAX_VIDEO; AUDIO_PACKET -> MAX_AUDIO; else -> MAX_CONTROL }
         if (size !in 0..max || media && size == 0) throw IOException("PROTOCOL: invalid payload length")
-        if (flags != 0 && !(type == VIDEO_FRAME && flags == 1)) throw IOException("PROTOCOL: reserved flags")
+        if (flags != 0 && !(type == VIDEO_FRAME && flags in 1..7)) throw IOException("PROTOCOL: reserved flags")
         if (media || type == STREAM_CONFIG || type == STREAM_READY) {
             if (session == 0L || generation < 1 || track !in 1..2 ||
                 type == VIDEO_FRAME && track != 1 || type == AUDIO_PACKET && track != 2
@@ -81,12 +80,17 @@ object Wire {
     fun write(target: OutputStream, message: Message) {
         with(message) {
             validate(type, flags, session, track, generation, pts, payload.size)
-            DataOutputStream(target).apply {
-                writeInt(0x53435059); writeShort(VERSION); writeShort(type)
-                writeInt(payload.size); writeInt(flags); writeLong(session)
-                writeInt(track); writeInt(generation); writeLong(pts)
-                write(payload); flush()
-            }
+            // Keep tiny header writes off TCP_NODELAY sockets without copying an entire large frame.
+            val prefixSize = minOf(payload.size, 16 * 1024)
+            val prefix = ByteBuffer.allocate(40 + prefixSize).apply {
+                putInt(0x53435059); putShort(VERSION.toShort()); putShort(type.toShort())
+                putInt(payload.size); putInt(flags); putLong(session)
+                putInt(track); putInt(generation); putLong(pts)
+                put(payload, 0, prefixSize)
+            }.array()
+            target.write(prefix)
+            if (prefixSize < payload.size) target.write(payload, prefixSize, payload.size - prefixSize)
+            target.flush()
         }
     }
 

@@ -38,8 +38,8 @@ class SenderSession internal constructor(
         sizeSwitch.permitsRestart(cleanupSucceeded && outcome.failure == null)
     private val timer = Executors.newSingleThreadScheduledExecutor()
     @Volatile private var link: ReceiverLink? = null
-    @Volatile private var privileged: CaptureBridge? = null
-    private var backend: CaptureBackend? = null
+    @Volatile private var backend: ProjectionCapture? = null
+    internal var projectionOwner: ProjectionOwner? = null
     private val stopping get() = outcome.stopping
     @Volatile private var requestSent = false
     @Volatile private var acceptedSession = false
@@ -72,7 +72,7 @@ class SenderSession internal constructor(
         trace.mark(SessionStopTrace.Stage.REQUESTED)
         status("Stopping")
         queueTerminal()
-        if (!acceptedSession || phaseDeadline > 0 && privileged != null) Thread({
+        if (!acceptedSession) Thread({
             trace.mark(SessionStopTrace.Stage.STARTUP_CANCEL)
             if (!acceptedSession) {
                 if (requestSent) try { terminalSent.await(500, TimeUnit.MILLISECONDS) }
@@ -80,7 +80,7 @@ class SenderSession internal constructor(
                 closeLink()
             }
             abortCapture()
-        }, "cancel-privileged-startup").start()
+        }, "cancel-capture-startup").start()
     }
     private fun fail(error: Exception, origin: SessionOutcome.Origin) {
         if (origin == SessionOutcome.Origin.CLEANUP) cleanupSucceeded = false
@@ -113,6 +113,13 @@ class SenderSession internal constructor(
         }
     }
     internal fun captureFailed(error: Exception) = fail(error, SessionOutcome.Origin.CAPTURE)
+    internal fun validateSizeSwitch(requested: Settings): Settings {
+        check()
+        val capture = backend ?: throw IOException("CAPTURE_FAILED: receiver capture mode is not negotiated")
+        val resolved = capture.validate(requested)
+        check()
+        return resolved
+    }
     internal fun terminalMessage(): Wire.Message = outcome.terminal(session, remoteStop)
     private fun queueTerminal() {
         if (requestSent && terminalQueued.compareAndSet(false, true)) {
@@ -126,18 +133,17 @@ class SenderSession internal constructor(
             trace.sessionStarted(session)
             settings.validate()
             timer.scheduleWithFixedDelay(::watchdog, 500, 500, TimeUnit.MILLISECONDS)
-            phase("Checking Shizuku shell capture", SessionStopTrace.Phase.ACCESS)
-            val shell = ShizukuSetup.shared.bridge().also { privileged = it }
-            phase("Preparing pinned capture backend", SessionStopTrace.Phase.DEPLOYING)
-            val capture = CaptureBackend(context, shell, ::captureFailed, trace).also { backend = it }
-            capture.deploy()
-            trace.phase(SessionStopTrace.Phase.CAPABILITIES)
-            settings = capture.validate(settings, capture.capabilities())
+            phase("Checking screen-sharing permission", SessionStopTrace.Phase.ACCESS)
+            val owner = projectionOwner ?: throw IOException("CAPTURE_FAILED: screen-sharing consent is required")
             phase("ConnectingReceiver", SessionStopTrace.Phase.CONNECTING)
             val connected = ReceiverLink(receiver).also { link = it }
             check()
             connected.connect()
             lastIncoming = now()
+            trace.phase(SessionStopTrace.Phase.CAPABILITIES)
+            val capture = ProjectionCapture(context, owner, ::captureFailed, connected.videoRotation).also { backend = it }
+            settings = capture.validate(settings)
+            diagnostic("event=VIDEO_ROTATION_NEGOTIATED fixed_natural=${connected.videoRotation}")
             phase("Negotiating", SessionStopTrace.Phase.NEGOTIATING)
             val request = settings.request().also { it.remove("mediaTransportMode") }
             connected.send(Wire.control(Wire.SESSION_REQUEST, session, request))
@@ -227,7 +233,7 @@ class SenderSession internal constructor(
     }
     private fun abortCapture() {
         trace.mark(SessionStopTrace.Stage.STARTUP_BRIDGE_CLOSE_BEGIN)
-        try { privileged?.close() } catch (e: IOException) { fail(e, SessionOutcome.Origin.CLEANUP) }
+        try { backend?.close() } catch (e: IOException) { fail(e, SessionOutcome.Origin.CLEANUP) }
         finally { trace.mark(SessionStopTrace.Stage.STARTUP_BRIDGE_CLOSE_END) }
     }
     private fun closeLink() {
@@ -292,11 +298,11 @@ class SenderSession internal constructor(
         try {
             val connected = checkNotNull(link) { "Receiver connection missing" }
             while (!Thread.currentThread().isInterrupted) {
-                var message = mux.poll(100)
-                if (message == null && now() - ping > 2_000_000_000L && !closing && !stopping && acceptedSession) {
-                    message = Wire.control(Wire.PING, session, Wire.obj("nonce" to (now() and 0x7fffffff).toInt()))
-                    ping = now()
-                }
+                val time = now()
+                val message = if (time - ping > 2_000_000_000L && !closing && !stopping && acceptedSession) {
+                    ping = time
+                    Wire.control(Wire.PING, session, Wire.obj("nonce" to (time and 0x7fffffff).toInt()))
+                } else mux.poll(100)
                 if (message != null) {
                     writeStarted = now(); mux.beginWrite(message)
                     try { connected.send(message) } finally { mux.endWrite(); writeStarted = 0 }
@@ -316,6 +322,11 @@ class SenderSession internal constructor(
     override fun packet(packet: Wire.Message) {
         check()
         mux.offer(packet)
+    }
+    override fun awaitVideoDrain() {
+        check()
+        mux.awaitVideoDrain()
+        check()
     }
 
     companion object {

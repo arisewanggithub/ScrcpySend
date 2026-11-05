@@ -141,7 +141,7 @@ internal class ReceiverCasting(private val clock: () -> Long = System::nanoTime)
                 }, own.phase != Phase.STOPPING || pendingSize != null, own.detail, true, own.request.token, revision)
                 busy -> Row(target, "Busy", false, "Receiver is busy", false, null, revision)
                 owned != null -> Row(target, "Play", false, "Another receiver is active", false, null, revision)
-                !ready -> Row(target, "Play", false, "Shizuku is unavailable", false, null, revision)
+                !ready -> Row(target, "Play", false, "Capture capabilities are unavailable", false, null, revision)
                 else -> Row(target, "Play", true, "", false, null, revision)
             }
         }

@@ -4,13 +4,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io"); content { includeGroupByRegex("com\\.github\\.MuntashirAkon.*") } }
     }
 }
 rootProject.name = "ScreenCopySender"
 include(":app")
-include(":libadb")
-project(":libadb").projectDir = file("third_party/libadb")
 if (providers.gradleProperty('releaseSmokeTest').getOrElse('false') == 'true') {
     include(':release-check')
 }

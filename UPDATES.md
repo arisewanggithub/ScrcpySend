@@ -53,7 +53,7 @@ Installing requires an idle cast; the updater never stops capture or playback. *
 
 A pending or interrupted installer attempt takes precedence over the launch check: its explicit retry status and retained file are preserved until a manual operation.
 
-Sender Settings remains available before Shizuku is ready for manual update checks; capture settings still require readiness and an idle cast.
+Sender Settings and update checks do not require screen-sharing consent; capture settings require an idle cast and query public Android metadata.
 
 Installer launch requests a standard activity result (`EXTRA_RETURN_RESULT`, request code 7312). Only public `RESULT_OK`, `RESULT_CANCELED`, and `RESULT_FIRST_USER` outcomes are used; no hidden installer extras or reflection are needed. The private pending-attempt record and activity UI state survive recreation/process restore without automatically installing again. Android cancellation, rejection, and an unavailable/unconfirmed result show explicit status plus **Retry installation** and **Later**; Back dismisses without retrying. A launch or even `RESULT_OK` alone is never reported as success: the app rereads its actually installed version code and current signing certificate against the verified attempt's signer. Returning during an active cast updates status without opening a focus-stealing dialog. Retried launches still require fresh APK verification and a final idle-cast guard.
 
@@ -162,17 +162,15 @@ configuration or `requireReleaseSigning=true` conflicts with smoke mode.
 The publisher explicitly uses smoke=false and rebuilds with the user-configured
 permanent signer; smoke APKs, debug keystores and AVD storage are never artifacts.
 
-The standalone cohort has **five tests**: four Source reflection/
-crypto cases and one manifest-resource/launcher check. They load actual app
-classes with the target package context/classloader, never compile app code.
-The Source cases construct the Shizuku Binder without attach/deploy/destroy,
-run `LocalAdb`'s BC identity/signature/certificate round trip with UUID storage
-and AndroidKeyStore aliases owned by the **harness UID**, perform a synthetic
-SPAKE2 native exchange, and load bundled Conscrypt native/provider/exporter APIs.
-No target-app private preferences/identity are read or written.
+The standalone cohort has **five tests**: four public projection API/package
+checks and one manifest-resource/launcher check. It verifies the actual app's
+projection/audio permissions and service types, resolves the system consent
+intent without launching it, queries public codec metadata, and checks that
+the APK contains no server, pairing archive, supervisor or native libraries.
+No target-app private preferences are read or written.
 CI also launches the real app process separately without selecting Play.
-Conscrypt's established-socket TLS exporter and real Shizuku/scrcpy/supervisor
-deployment are **not** exercised by this smoke.
+Screen-sharing consent, screen/audio capture, encoding and network playback
+are **not** exercised by this smoke.
 
 CI installs only on its isolated emulator after DEX verification rejects
 duplicate app implementations, crypto/ADB/native wrapper classes, copied native
@@ -188,10 +186,8 @@ self-instrumenting mode avoids app dependency subtraction and app mapping; no
 production stdlib functions are retained merely for tests. The previous shared
 AndroidTest harness crashed before executing tests and is retired; its former
 11-test selection is not claimed as successful optimized coverage.
-The existing `LocalAdb` identity constructor/accessors and the explicit isolated
-`Secrets` constructor are retained narrowly because the separate test APK must
-call them after optimization. No new production hook, backend path, network
-method keep or whole-ADB-package keep is added.
+No production capture test hooks, privileged reflection roots or whole-package
+keep rules are added.
 No real-phone capture/Stop, especially H.265, is part of R8 acceptance.
 Ephemeral signing does not validate an in-place production-signer update.
 

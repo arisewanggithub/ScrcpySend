@@ -205,7 +205,7 @@ class OpusTimestampCompatibilityTest {
         val mux = configured()
         assertThrows(SenderProtocolException::class.java) { mux.offer(packet(-1)) }
         for (invalid in listOf(packet(-1), packet(1).copy(flags = 1),
-            packet(1, generation = 0), packet(1).copy(track = 1), packet(1, track = 1).copy(flags = 2))) {
+            packet(1, generation = 0), packet(1).copy(track = 1), packet(1, track = 1).copy(flags = 8))) {
             assertThrows(IOException::class.java) { Wire.write(ByteArrayOutputStream(), invalid) }
         }
     }

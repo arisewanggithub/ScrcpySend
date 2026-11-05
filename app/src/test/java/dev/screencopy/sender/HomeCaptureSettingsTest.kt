@@ -125,14 +125,10 @@ class HomeCaptureSettingsTest {
         val parsed = Settings.from(Wire.parseJson(request.settings.toByteArray()))
         assertEquals(0, parsed.maxSize)
         assertTrue(parsed.request().getJSONObject("video").isNull("crop"))
-        val options = CaptureBackend.options(parsed, "12345678")
-        assertTrue(options.contains(" max_size=0 "))
-        assertFalse(options.contains(" crop="))
-        assertTrue(options.contains(" max_fps=30 "))
-        assertTrue(options.contains(" display_id=2 "))
-        assertTrue(options.contains(" capture_orientation=@270 "))
-        assertTrue(options.contains(" video_bit_rate=2500000"))
-        assertTrue(options.contains(" downsize_on_error=false "))
+        assertEquals(30, parsed.maxFps)
+        assertEquals(2, parsed.displayId)
+        assertEquals("@270", parsed.orientation)
+        assertEquals(2_500_000, parsed.videoBitrate)
         ignore = false
         saved.maxFps = 24
         assertEquals(request.settings, casting.snapshot().active!!.request.settings)

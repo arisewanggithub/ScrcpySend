@@ -188,8 +188,8 @@ class LanSessionTest {
         assertThrows(IllegalArgumentException::class.java) { ReceiverTarget("", 27184) }
         assertThrows(IllegalArgumentException::class.java) { ReceiverTarget("host", 0) }
         assertThrows(IllegalArgumentException::class.java) { ReceiverTarget("host", 27184, "") }
-        val saved = WirelessPairing.nonSensitiveDraft(mapOf("host" to "192.0.2.12", "port" to "27184",
-            "pairPort" to "37", "videoBitrate" to "8000000"))
-        assertEquals(mapOf("pairPort" to "37", "videoBitrate" to "8000000"), saved)
+        val saved = Settings().request()
+        assertFalse(saved.has("host"))
+        assertFalse(saved.has("port"))
     }
 }

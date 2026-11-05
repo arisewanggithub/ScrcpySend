@@ -51,6 +51,7 @@ internal class SessionOutcome {
     }
     companion object {
         fun errorCode(error: Exception): String =
+            if (error is java.net.SocketTimeoutException) "TIMEOUT" else
             listOf("UNSUPPORTED_CONFIG", "CONGESTION", "AUDIO_FAILED", "CAPTURE_FAILED", "DECODER_FAILED", "TIMEOUT", "PROTOCOL", "VERSION", "BUSY")
                 .firstOrNull { error.message?.startsWith(it) == true } ?: "INTERNAL"
         fun safeMessage(error: Exception): String = when {

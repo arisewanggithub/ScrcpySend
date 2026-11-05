@@ -15,9 +15,9 @@ class HardwareEncoderInventoryDeviceTest {
                 it.isEncoder && (!mime.startsWith("video/") || it.isHardwareAccelerated && !it.isSoftwareOnly) &&
                     it.supportedTypes.any { type -> type.equals(mime, true) }
             }.map { it.name }.distinct()
-            assertEquals(expected, CaptureBackend.encoders(codec))
+            assertEquals(expected, HardwareEncoderDiscovery.read().names(codec))
             assertEquals(expected, HardwareEncoderDiscovery.codecs(codec).map { it.name }.distinct())
         }
-        assertTrue(CaptureBackend.encoders("raw").isEmpty())
+        assertTrue(HardwareEncoderDiscovery.read().names("raw").isEmpty())
     }
 }

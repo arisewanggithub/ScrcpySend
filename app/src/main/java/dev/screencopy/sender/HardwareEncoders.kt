@@ -89,7 +89,7 @@ internal class HardwareEncoders(private val metadata: List<EncoderMetadata>) {
         }
         fun fromReport(report: String): HardwareEncoders {
             val lines = report.lineSequence().filter { it.startsWith(PREFIX) }.toList()
-            check(lines.size == 1) { "Verified encoder inventory unavailable. Refresh Shizuku capabilities." }
+            check(lines.size == 1) { "Verified encoder inventory unavailable. Refresh capture capabilities." }
             val array = JSONArray(lines.single().removePrefix(PREFIX))
             check(array.length() <= 256) { "Encoder inventory exceeds limit" }
             return HardwareEncoders((0 until array.length()).map {
